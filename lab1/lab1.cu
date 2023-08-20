@@ -4,7 +4,6 @@
 extern "C" {
 
 #include <stdio.h>
-#include <math.h>
 #include <time.h>
 
 
@@ -87,7 +86,6 @@ int main() {
     cudaMalloc((void**)&d_b, VEC_MEM_SIZE);
     cudaMalloc((void**)&d_c, VEC_MEM_SIZE);
 
-    srand(SEED);
     d_fill_uniform<<<calc_grid_size(VEC_LEN), BLOCK_SIZE>>>(
         d_a, d_b, VEC_LEN, VEC_MAX_ABS_VAL, SEED);
     cudaMemcpy(h_a, d_a, VEC_MEM_SIZE, cudaMemcpyDeviceToHost);
