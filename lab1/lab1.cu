@@ -1,4 +1,5 @@
 #include <cuda_runtime.h>
+#include <curand_kernel.h>
 
 extern "C" {
 
@@ -23,6 +24,21 @@ __global__ void d_add(float *a, float *b, float *c, int n) {
 }
 
 
+__global__ void d_fill_uniform(
+    float *a, float *b, int n, float r, unsigned long long seed) {
+    
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+
+    if (i < n) {
+        curandState_t state;
+        curand_init(seed, i, 0, &state);
+
+        a[i] = -r + 2 * r * curand_uniform(&state);
+        b[i] = -r + 2 * r * curand_uniform(&state);
+    }
+}
+
+
 float compare(float *a, float *b, int n, float eps) {
     float diff = 0;
 
@@ -36,47 +52,55 @@ float compare(float *a, float *b, int n, float eps) {
     return diff;
 }
 
-
-void fill(float *a, float *b, int n, float r) {
-    for (int i = 0; i < n; i++) {
-        a[i] = -r + 2 * r * ((float)rand() / RAND_MAX);
-        b[i] = -r + 2 * r * ((float)rand() / RAND_MAX);
-    }
 }
 
-}
+#ifndef REDEFINE
+    #define VEC_LEN 51200000
+    #define VEC_LEN_INC 512000
+    #define CHECK_FIRST 51200
+    #define BLOCK_SIZE 128
+    #define FNAME_STAMPS "timings.stmp"
+    #define PRECISION 10e-10
+    #define SEED 27
+    #define VEC_MAX_ABS_VAL 101
+#endif
 
-
-#define VEC_LEN 51200000
-#define VEC_LEN_INC 512000
-#define VEC_MAX_ABS_VAL 101
-#define SEED 27
-#define BLOCK_SIZE 128
 #define VEC_MEM_SIZE (VEC_LEN * sizeof(float))
-#define FILE_NAME "timings.stmp"
-#define PRECISION 10e-8
-#define ts_to_ms(ts) ((ts.tv_sec * 10e9 + ts.tv_nsec) * 10e-6)
+#define ts_to_ms(ts) (ts.tv_sec * 10e3 + ts.tv_nsec * 10e-6)
+#define calc_grid_size(m) ((m + BLOCK_SIZE - 1) / BLOCK_SIZE)
+
 
 
 int main() {
-    FILE* file = fopen(FILE_NAME, "a");
+    float *h_a __attribute__ ((aligned (64)));
+    float *h_b __attribute__ ((aligned (64)));
+    float *h_c __attribute__ ((aligned (64)));
+    float *h_d __attribute__ ((aligned (64)));
 
-    float *h_a, *h_b, *h_c, *h_d;
     h_a = (float*)malloc(VEC_MEM_SIZE);
     h_b = (float*)malloc(VEC_MEM_SIZE);
     h_c = (float*)malloc(VEC_MEM_SIZE);
     h_d = (float*)malloc(VEC_MEM_SIZE);
-
-    srand(SEED);
-    fill(h_a, h_b, VEC_LEN, VEC_MAX_ABS_VAL);
 
     float *d_a, *d_b, *d_c;
     cudaMalloc((void**)&d_a, VEC_MEM_SIZE);
     cudaMalloc((void**)&d_b, VEC_MEM_SIZE);
     cudaMalloc((void**)&d_c, VEC_MEM_SIZE);
 
-    cudaMemcpy(d_a, h_a, VEC_MEM_SIZE, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_b, h_b, VEC_MEM_SIZE, cudaMemcpyHostToDevice);
+    srand(SEED);
+    d_fill_uniform<<<calc_grid_size(VEC_LEN), BLOCK_SIZE>>>(
+        d_a, d_b, VEC_LEN, VEC_MAX_ABS_VAL, SEED);
+    cudaMemcpy(h_a, d_a, VEC_MEM_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_b, d_b, VEC_MEM_SIZE, cudaMemcpyDeviceToHost);
+
+    h_add(h_a, h_b, h_c, CHECK_FIRST);
+    d_add<<<calc_grid_size(CHECK_FIRST), BLOCK_SIZE>>>(d_a, d_b, d_c, CHECK_FIRST);
+    cudaMemcpy(h_d, d_c, CHECK_FIRST * sizeof(float), cudaMemcpyDeviceToHost);
+
+    if (compare(h_c, h_d, CHECK_FIRST, PRECISION) > PRECISION) {
+        printf("Panic!\n");
+        return -1;
+    }
 
     float h_time;
     timespec h_start, h_stop;
@@ -86,31 +110,20 @@ int main() {
     cudaEventCreate(&d_start);
     cudaEventCreate(&d_stop);
 
-    int grid_size;
-
+    FILE* file = fopen(FNAME_STAMPS, "w");
     fprintf(file, "Vector Length, CPU Time, GPU Time\n");
 
-    for (int m = VEC_LEN_INC; m < VEC_LEN; m += VEC_LEN_INC) {
-        grid_size = (m + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        // or the same "grid_size = ceil((float)m / BLOCK_SIZE)" 
-
+    for (int m = VEC_LEN_INC; m <= VEC_LEN; m += VEC_LEN_INC) {
         clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &h_start);
         h_add(h_a, h_b, h_c, m);
         clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &h_stop);
         h_time = (ts_to_ms(h_stop) - ts_to_ms(h_start)); // time in ms
 
         cudaEventRecord(d_start);
-        d_add<<<grid_size, BLOCK_SIZE>>>(d_a, d_b, d_c, m);
+        d_add<<<calc_grid_size(m), BLOCK_SIZE>>>(d_a, d_b, d_c, m);
         cudaEventRecord(d_stop);
         cudaEventSynchronize(d_stop);
         cudaEventElapsedTime(&d_time, d_start, d_stop); // time in ms
-
-        cudaMemcpy(h_d, d_c, m * sizeof(float), cudaMemcpyDeviceToHost);
-
-        if (compare(h_c, h_d, m, PRECISION) > PRECISION) {
-            printf("Panic!\n");
-            break;
-        }
 
         fprintf(file, "%d, %f, %f\n", m, h_time, d_time);
     }
