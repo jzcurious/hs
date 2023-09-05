@@ -4,7 +4,6 @@
 extern "C" {
 
 #include <stdio.h>
-#include <time.h>
 
 
 __host__ void h_add(float* a, float* b, float* c, int n) {
@@ -67,7 +66,6 @@ float compare(float *a, float *b, int n, float eps) {
 #define VEC_MEM_SIZE (VEC_LEN * sizeof(float))
 #define ts_to_ms(ts) (ts.tv_sec * 10e3 + ts.tv_nsec * 10e-6)
 #define calc_grid_size(m) ((m + BLOCK_SIZE - 1) / BLOCK_SIZE)
-
 
 
 int main() {
