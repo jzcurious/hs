@@ -175,3 +175,10 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Datasets
+data/
+.data
+
+# Models
+*.pt
