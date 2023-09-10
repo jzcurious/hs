@@ -2,6 +2,30 @@
 
 
 template <typename scalar_t>
+__forceinline__ __device__
+void gpuAtomicAdd(scalar_t *acc_ptr, scalar_t part_val) {
+    #if __CUDA_ARCH__ >= 700
+        if constexpr (std::is_same_v<scalar_t, c10::Half>) {
+            atomicAdd(
+                reinterpret_cast<half*>(acc_ptr), 
+                static_cast<half>(part_val)
+            );
+        }
+        else {
+            atomicAdd(acc_ptr, part_val);
+        }
+    #else
+        if constexpr (std::is_same_v<scalar_t, float>) {
+            atomicAdd(acc_ptr, part_val);
+        }
+        else {
+            assert(false && "Not supported CUDA device.");
+        }
+    #endif
+}
+
+
+template <typename scalar_t>
 __global__ void linear_forward_kernel(
     const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> input,
     const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> weights,
@@ -21,7 +45,7 @@ __global__ void linear_forward_kernel(
            part += bias[j];
         }
         
-        atomicAdd(&output[k][j], part);
+        gpuAtomicAdd(&output[k][j], part);
     }
 }
 
@@ -43,11 +67,11 @@ __global__ void linear_backward_kernel(
     bool guard = i < weights.size(0) and j < weights.size(1) and k < input.size(0);
 
     if (guard) {
-        atomicAdd(&d_input[k][i], d_output[k][j] * weights[i][j]);
-        atomicAdd(&d_weights[i][j], d_output[k][j] * input[k][i]);
+        gpuAtomicAdd(&d_input[k][i], d_output[k][j] * weights[i][j]);
+        gpuAtomicAdd(&d_weights[i][j], d_output[k][j] * input[k][i]);
 
         if (i == 0) {
-            atomicAdd(&d_bias[j], d_output[k][j]);
+            gpuAtomicAdd(&d_bias[j], d_output[k][j]);
         }
     }
 }
@@ -98,8 +122,8 @@ torch::Tensor linear_forward(
     dim3 grid_size, block_size;
     std::tie(grid_size, block_size) = configure_grid(
         input.size(0), input.size(1), weights.size(1));
-    
-    AT_DISPATCH_FLOATING_TYPES(
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.type(),
         "linear_forward",
         ([&] {
@@ -140,7 +164,7 @@ std::vector<torch::Tensor> linear_backward(
     std::tie(grid_size, block_size) = configure_grid(
         input.size(0), input.size(1), weights.size(1));
     
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.type(),
         "linear_backward",
         ([&] {

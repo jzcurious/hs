@@ -14,8 +14,13 @@ __global__ void d_add(float *a, float *b, float *c, int n) {
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 #define CHECK_SIZE(x, y) TORCH_CHECK(x.is_same_size(y), #y " must be the same size as " #x)
-#define BLOCK_SIZE 128
-#define CALC_GRID_SIZE(m) ((m + BLOCK_SIZE - 1) / BLOCK_SIZE)
+
+const int block_size = 128;
+
+
+__forceinline__ int calc_grid_size(int m) {
+    return (m + block_size - 1) / block_size;
+}
 
 
 torch::Tensor my_add(torch::Tensor a, torch::Tensor b) {
@@ -26,7 +31,7 @@ torch::Tensor my_add(torch::Tensor a, torch::Tensor b) {
     auto c = torch::empty_like(a);
     int n = a.numel();
 
-    d_add<<<CALC_GRID_SIZE(n), BLOCK_SIZE>>>(
+    d_add<<<calc_grid_size(n), block_size>>>(
         a.data_ptr<float>(),
         b.data_ptr<float>(),
         c.data_ptr<float>(),

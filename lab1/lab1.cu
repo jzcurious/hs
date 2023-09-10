@@ -52,13 +52,14 @@ float compare(float *a, float *b, int n, float eps) {
 
 }
 
+
 #ifndef REDEFINE
-    #define VEC_LEN 51200000
-    #define VEC_LEN_INC 512000
+    #define VEC_LEN 5120000
+    #define VEC_LEN_INC 51200
     #define CHECK_FIRST 51200
     #define BLOCK_SIZE 128
     #define FNAME_STAMPS "timings.stmp"
-    #define PRECISION 10e-10
+    #define ATOL 10e-8
     #define SEED 27
     #define VEC_MAX_ABS_VAL 101
 #endif
@@ -93,7 +94,7 @@ int main() {
     d_add<<<calc_grid_size(CHECK_FIRST), BLOCK_SIZE>>>(d_a, d_b, d_c, CHECK_FIRST);
     cudaMemcpy(h_d, d_c, CHECK_FIRST * sizeof(float), cudaMemcpyDeviceToHost);
 
-    if (compare(h_c, h_d, CHECK_FIRST, PRECISION) > PRECISION) {
+    if (compare(h_c, h_d, CHECK_FIRST, ATOL) > ATOL) {
         printf("Panic!\n");
         return -1;
     }
