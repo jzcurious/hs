@@ -1,27 +1,32 @@
 import torch
-from torch.utils.cpp_extension import load
+from torch.utils import cpp_extension
 
 
 class LinearFunction(torch.autograd.Function):
-    ext = load(
-        name='my_extension',
-        sources=['hs/lab3/lab3.cu'],
-        extra_cuda_cflags=[
-            '-std=c++17',
-            '--extended-lambda',
-            '-O3'
-        ],
-        extra_cflags=['-O3'],
-    )
+    @staticmethod
+    def up_backend(backend_impl=None):
+        if backend_impl is not None:
+            LinearFunction.backend = backend_impl
+        else:
+            LinearFunction.backend = cpp_extension.load(
+                name='my_extension',
+                sources=['hs/lab3/lab3.cu'],
+                extra_cuda_cflags=[
+                    '-std=c++17',
+                    '--extended-lambda',
+                    '-O3'
+                ],
+                extra_cflags=['-O3'],
+            )
 
     @staticmethod
     def forward(ctx, input, weights, bias):
         ctx.save_for_backward(input, weights, bias)
-        return LinearFunction.ext.linear_forward(input, weights, bias)
+        return LinearFunction.backend.linear_forward(input, weights, bias)
 
     @staticmethod
     def backward(ctx, d_output):
-        d_input, d_weights, d_bias = LinearFunction.ext.linear_backward(
+        d_input, d_weights, d_bias = LinearFunction.backend.linear_backward(
             *ctx.saved_tensors, d_output)
         return d_input, d_weights, d_bias
 
@@ -72,6 +77,9 @@ def test(dtype=torch.float32):
 
 if __name__ == '__main__':
     torch.manual_seed(27)
+
+    LinearFunction.up_backend()
+
     test(torch.float32)
 
     if torch.cuda.get_device_capability()[0] >= 7:

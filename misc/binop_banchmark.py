@@ -35,7 +35,7 @@ def binop_benchmark(low, high, step, binop_impl, dtype=torch.float32,
     num_test = (high - low) // step
 
     if not bar_label:
-        bar_label = 'Vector Addition Benchmark'
+        bar_label = 'Benchmark'
 
     total_time = 0.0
 

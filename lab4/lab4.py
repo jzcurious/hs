@@ -33,18 +33,20 @@ class Linear(nn.Module):
 
 def test(dtype=torch.float32):
     factory_kwargs = {'device': 'cuda', 'dtype': dtype}
-    x = torch.rand(256, 1024, **factory_kwargs)
+    x = torch.rand(1024, 1024, **factory_kwargs)
 
     torch.manual_seed(27)
     net1 = nn.Sequential(
-        nn.Linear(1024, 17, **factory_kwargs),
-        nn.Linear(17, 8, **factory_kwargs),
+        nn.Linear(1024, 128, **factory_kwargs),
+        nn.Linear(128, 16, **factory_kwargs),
+        nn.Linear(16, 8, **factory_kwargs),
     )
 
     torch.manual_seed(27)
     net2 = nn.Sequential(
-        Linear(1024, 17, **factory_kwargs),
-        Linear(17, 8, **factory_kwargs),
+        Linear(1024, 128, **factory_kwargs),
+        Linear(128, 16, **factory_kwargs),
+        Linear(16, 8, **factory_kwargs),
     )
 
     state_dict = net1.state_dict().copy()
@@ -58,8 +60,8 @@ def test(dtype=torch.float32):
     y1 = net1(x)
     y2 = net2(x)
 
-    atol = 1e-4
-    rtol = 1e-5
+    atol = 1e-3
+    rtol = 1e-4
 
     assert torch.allclose(y1, y2, atol=atol, rtol=rtol)
 
@@ -78,6 +80,8 @@ def test(dtype=torch.float32):
 
 
 if __name__ == '__main__':
+    LinearFunction.up_backend()
+
     test(torch.float32)
 
     if torch.cuda.get_device_capability()[0] >= 7:

@@ -27,7 +27,7 @@ def make_plot(df):
                 title_text="Vector Length"
             ),
             yaxis=dict(autorange=True, title_text="Time, ms"),
-            title_text="Real complexity of vectors addition",
+            title_text="Real complexity of operation",
             hovermode="closest",
             title_x=0.5,
             template="plotly_dark"),

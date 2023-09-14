@@ -32,33 +32,68 @@ void gpuAtomicAdd(scalar_t *acc_ptr, scalar_t part_val) {
 }
 
 
-template <typename scalar_t>
-__global__ void linear_forward_kernel(
-    const accessor_2d<scalar_t>input,
-    const accessor_2d<scalar_t>weight,
-    const accessor_1d<scalar_t>bias,
+template <int batch_size, int weight_rows, int weight_cols, typename scalar_t>
+__global__ void linear_forward_kernel_shmem(
+    const accessor_2d<scalar_t> input,
+    const accessor_2d<scalar_t> weight,
+    const accessor_1d<scalar_t> bias,
     accessor_2d<scalar_t> output) {
+
+    __shared__ scalar_t local_input[batch_size][weight_rows];   // 32: 128b .. 256b
+    __shared__ scalar_t local_weight[weight_rows][weight_cols]; // 32: 128b .. 256b
+    __shared__ scalar_t local_bias[weight_cols];                //  4: 16b  ..  32b
+    __shared__ scalar_t local_output[batch_size][weight_cols];  // 16: 64b  .. 128b
 
     auto k = blockIdx.x * blockDim.x + threadIdx.x;
     auto i = blockIdx.y * blockDim.y + threadIdx.y;
     auto j = blockIdx.z * blockDim.z + threadIdx.z;
 
+    auto l_k = threadIdx.x;
+    auto l_i = threadIdx.y;
+    auto l_j = threadIdx.z;
+
     bool guard = i < weight.size(0) and j < weight.size(1) and k < input.size(0);
 
     if (guard) {
-        auto part = input[k][i] * weight[i][j];
-
-        if (i == 0) {
-           part += bias[j];
+        if (l_j == 0) {
+            local_input[l_k][l_i] = input[k][i];
         }
 
-        gpuAtomicAdd(&output[k][j], part);
+        if (l_k == 0) {
+            local_weight[l_i][l_j] = weight[i][j];
+        }
+
+        if (l_k == 0 and l_i == 0) {
+            local_bias[l_j] = bias[j];
+        }
+
+        if (l_i == 0) {
+            local_output[l_k][l_j] = 0;
+        }
+    }
+
+    __syncthreads();
+
+    if (guard) {
+        auto part = local_input[l_k][l_i] * local_weight[l_i][l_j];
+
+        if (i == 0) {
+           part += local_bias[l_j];
+        }
+        
+        gpuAtomicAdd(&local_output[l_k][l_j], part);
+    }
+
+    __syncthreads();
+
+    if (guard and l_i == 0) {
+        gpuAtomicAdd(&output[k][j], local_output[l_k][l_j]);
     }
 }
 
 
-template <typename scalar_t>
-__global__ void linear_backward_kernel(
+template <int batch_size, int weight_rows, int weight_cols, typename scalar_t>
+__global__ void linear_backward_kernel_shmem(
     const accessor_2d<scalar_t> input,
     const accessor_2d<scalar_t> weight,
     const accessor_2d<scalar_t> d_output,
@@ -66,18 +101,70 @@ __global__ void linear_backward_kernel(
     accessor_2d<scalar_t> d_weight,
     accessor_1d<scalar_t> d_bias) {
 
+    __shared__ scalar_t local_input[batch_size][weight_rows];     // 32: 128b .. 256b
+    __shared__ scalar_t local_weight[weight_rows][weight_cols];   // 32: 128b .. 256b
+    __shared__ scalar_t local_d_output[batch_size][weight_cols];  // 16: 64b  .. 128b
+    __shared__ scalar_t local_d_input[batch_size][weight_rows];   // 32: 128b .. 256b
+    __shared__ scalar_t local_d_weight[weight_rows][weight_cols]; // 32: 128b .. 256b
+    __shared__ scalar_t local_d_bias[weight_cols];                //  4:  16b ..  32b
+
     auto k = blockIdx.x * blockDim.x + threadIdx.x;
     auto i = blockIdx.y * blockDim.y + threadIdx.y;
     auto j = blockIdx.z * blockDim.z + threadIdx.z;
 
+    auto l_k = threadIdx.x;
+    auto l_i = threadIdx.y;
+    auto l_j = threadIdx.z;
+
     bool guard = i < weight.size(0) and j < weight.size(1) and k < input.size(0);
 
     if (guard) {
-        gpuAtomicAdd(&d_input[k][i], d_output[k][j] * weight[i][j]);
-        gpuAtomicAdd(&d_weight[i][j], d_output[k][j] * input[k][i]);
+        if (l_j == 0) {
+            local_input[l_k][l_i] = input[k][i];
+            local_d_input[l_k][l_i] = 0;
+        }
+
+        if (l_k == 0) {
+            local_weight[l_i][l_j] = weight[i][j];
+            local_d_weight[l_i][l_j] = 0;
+        }
+        
+        if (l_i == 0) {
+            local_d_output[l_k][l_j] = d_output[k][j];
+        }
+
+        if (l_k == 0 and l_i == 0) {
+            local_d_bias[l_j] = 0;           
+        }
+    }
+
+    __syncthreads();
+
+    if (guard) {
+        gpuAtomicAdd(&local_d_input[l_k][l_i],
+            local_d_output[l_k][l_j] * local_weight[l_i][l_j]);
+        
+        gpuAtomicAdd(&local_d_weight[l_i][l_j],
+            local_d_output[l_k][l_j] * local_input[l_k][l_i]);
 
         if (i == 0) {
-            gpuAtomicAdd(&d_bias[j], d_output[k][j]);
+            gpuAtomicAdd(&local_d_bias[l_j], local_d_output[l_k][l_j]);
+        }
+    }
+
+    __syncthreads();
+
+    if (guard) {
+        if (l_j == 0) {
+            gpuAtomicAdd(&d_input[k][i], local_d_input[l_k][l_i]);
+        }
+
+        if (l_k == 0) {
+            gpuAtomicAdd(&d_weight[i][j], local_d_weight[l_i][l_j]);
+        }
+
+        if (l_k == 0 and l_i == 0) {
+            gpuAtomicAdd(&d_bias[j], local_d_bias[l_j]);
         }
     }
 }
@@ -96,21 +183,6 @@ __forceinline__ unsigned int div_and_ceil(float x, float y) {
 }
 
 
-__forceinline__ std::tuple<dim3, dim3> configure_grid(
-    unsigned int nx, unsigned int ny, unsigned int nz) {
-
-    const dim3 block_size = {4, 8, 4};
-
-    const dim3 grid_size = {
-        div_and_ceil(nx, block_size.x),
-        div_and_ceil(ny, block_size.y),
-        div_and_ceil(nz, block_size.z)
-    };
-
-    return {grid_size, block_size}; 
-}
-
-
 torch::Tensor linear_forward(
     torch::Tensor input,
     torch::Tensor weight,
@@ -125,15 +197,19 @@ torch::Tensor linear_forward(
 
     auto output = torch::zeros({input.size(0), weight.size(1)}, input.options());
 
-    dim3 grid_size, block_size;
-    std::tie(grid_size, block_size) = configure_grid(
-        input.size(0), input.size(1), weight.size(1));
+    constexpr dim3 block_dim = {4, 8, 4};
+
+    const dim3 grid_dim = {
+        div_and_ceil(input.size(0), block_dim.x),
+        div_and_ceil(input.size(1), block_dim.y),
+        div_and_ceil(weight.size(1), block_dim.z)
+    };
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(),
         "linear_forward",
         ([&] {
-            linear_forward_kernel<<<grid_size, block_size>>>(
+            linear_forward_kernel_shmem<block_dim.x, block_dim.y, block_dim.z><<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 bias.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
@@ -166,15 +242,19 @@ std::vector<torch::Tensor> linear_backward(
     auto d_weight = torch::zeros_like(weight);
     auto d_bias = torch::zeros_like(bias);
 
-    dim3 grid_size, block_size;
-    std::tie(grid_size, block_size) = configure_grid(
-        input.size(0), input.size(1), weight.size(1));
+    constexpr dim3 block_dim = {4, 8, 4};
+
+    const dim3 grid_dim = {
+        div_and_ceil(input.size(0), block_dim.x),
+        div_and_ceil(input.size(1), block_dim.y),
+        div_and_ceil(weight.size(1), block_dim.z)
+    };
     
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-        input.scalar_type(),
+        input.type(),
         "linear_backward",
         ([&] {
-            linear_backward_kernel<<<grid_size, block_size>>>(
+            linear_backward_kernel_shmem<block_dim.x, block_dim.y, block_dim.z><<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 d_output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),

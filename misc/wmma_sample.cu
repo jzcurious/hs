@@ -11,7 +11,7 @@ __global__ void kernel_matmul_wmma(half *a, half *b, float *c, int M, int N, int
     wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
 
     int warp_x = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
-    int warp_y = (blockIdx.y * blockDim.y + threadIdx.y) / warpSize;
+    int warp_y = (blockIdx.y * blockDim.y + threadIdx.y);
 
     int a_row = warp_y * WMMA_M;
     int b_col = warp_x * WMMA_N;
@@ -51,21 +51,22 @@ __forceinline__ unsigned int div_and_ceil(float x, float y) {
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.device().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
-#define CHECK_SIZE_FOR_WMMA(x, wmma_size) TORCH_CHECK( \
-    static_cast<float>(x.dim(0)) / wmma_size == 0.0 and \
-    static_cast<float>(x.dim(1)) / wmma_size == 0.0, \
-    #x " size by all dimensions must be multiples of " #wmma_size " for wmma")
 #define CHECK_CUDA_ARG(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
+
 #define CHECK_COMPATIBILITY(x, y, d1, d2) \
     TORCH_CHECK(x.size(d1) == y.size(d2), \
     #x " must be the same size by dim(" #d1 ") as " #y " by dim(" #d2 ")")
+
+#define CHECK_SIZE_FOR_WMMA(x, wmma_size) TORCH_CHECK( \
+    x.dim(0) % wmma_size == 0.0 and x.dim(1) % wmma_size == 0.0, \
+    #x " size by all dimensions must be multiples of " #wmma_size " for WMMMA")
 
 
 torch::Tensor matmul_tensor_cores(
     torch::Tensor matrix_a,
     torch::Tensor matrix_b) {
 
-    const WMMA_SIZE = 16;
+    const int WMMA_SIZE = 16;
 
     CHECK_CUDA_ARG(matrix_a);
     CHECK_CUDA_ARG(matrix_b);
@@ -83,7 +84,7 @@ torch::Tensor matmul_tensor_cores(
     );
 
     const dim3 block_size = {
-        32, 4
+        128, 4
     };
 
     dim3 grid_size = {
