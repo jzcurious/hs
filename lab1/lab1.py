@@ -44,5 +44,5 @@ if __name__ == '__main__':
     )
     args = args_parser.parse_args()
 
-    df = pd.read_csv(args.stampfile, skipinitialspace=True)
+    df = pd.read_csv(args.stmpfile, skipinitialspace=True)
     make_plot(df)

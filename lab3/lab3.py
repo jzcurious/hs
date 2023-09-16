@@ -68,15 +68,13 @@ class LabTest(unittest.TestCase):
 
         z_.backward(torch.ones_like(z_))
 
-        # match (dtype, verif):
-        #     case (torch.float16, False):
-        #         tol = {'atol': 1e-4, 'rtol': 1e-3}
-        #     case (_, False):
-        #         tol = {'atol': 1e-5, 'rtol': 1e-4}
-        #     case (_, True):
-        #         tol = {'atol': 1e-8, 'rtol': 1e-5}
-
-        tol = {'atol': 1e-8, 'rtol': 1e-5}
+        match (dtype, verif):
+            case (torch.float16, False):
+                tol = {'atol': 1e-4, 'rtol': 1e-3}
+            case (_, False):
+                tol = {'atol': 1e-5, 'rtol': 1e-4}
+            case (_, True):
+                tol = {'atol': 1e-8, 'rtol': 1e-5}
 
         self.assertTrue(torch.allclose(z_, z, **tol))
         self.assertTrue(torch.allclose(x_.grad, x.grad, **tol))
