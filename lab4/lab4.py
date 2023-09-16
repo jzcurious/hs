@@ -2,6 +2,7 @@ from ..lab3.lab3 import LinearFunction
 import torch
 from torch import nn
 import math
+import unittest
 
 
 class Linear(nn.Module):
@@ -31,59 +32,67 @@ class Linear(nn.Module):
         )
 
 
-def test(dtype=torch.float32):
-    factory_kwargs = {'device': 'cuda', 'dtype': dtype}
-    x = torch.rand(1024, 1024, **factory_kwargs)
+class LabTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        LinearFunction.up_backend()
 
-    torch.manual_seed(27)
-    net1 = nn.Sequential(
-        nn.Linear(1024, 128, **factory_kwargs),
-        nn.Linear(128, 16, **factory_kwargs),
-        nn.Linear(16, 8, **factory_kwargs),
-    )
+    def generic_case(self, dtype):
+        factory_kwargs = {'device': 'cuda', 'dtype': dtype}
+        x = torch.rand(1024, 1024, **factory_kwargs)
 
-    torch.manual_seed(27)
-    net2 = nn.Sequential(
-        Linear(1024, 128, **factory_kwargs),
-        Linear(128, 16, **factory_kwargs),
-        Linear(16, 8, **factory_kwargs),
-    )
+        torch.manual_seed(27)
+        net1 = nn.Sequential(
+            nn.Linear(1024, 128, **factory_kwargs),
+            nn.Linear(128, 16, **factory_kwargs),
+            nn.Linear(16, 8, **factory_kwargs),
+        )
 
-    state_dict = net1.state_dict().copy()
+        torch.manual_seed(27)
+        net2 = nn.Sequential(
+            Linear(1024, 128, **factory_kwargs),
+            Linear(128, 16, **factory_kwargs),
+            Linear(16, 8, **factory_kwargs),
+        )
 
-    for k in state_dict:
-        if 'weight' in k:
-            state_dict[k] = state_dict[k].data.t_()
+        state_dict = net1.state_dict().copy()
 
-    net2.load_state_dict(state_dict)
+        for k in state_dict:
+            if 'weight' in k:
+                state_dict[k] = state_dict[k].data.t_()
 
-    y1 = net1(x)
-    y2 = net2(x)
+        net2.load_state_dict(state_dict)
 
-    atol = 1e-3
-    rtol = 1e-4
+        y1 = net1(x)
+        y2 = net2(x)
 
-    assert torch.allclose(y1, y2, atol=atol, rtol=rtol)
+        a = 1e-3
+        r = 1e-4
 
-    y1.backward(torch.ones_like(y1))
-    y2.backward(torch.ones_like(y2))
+        self.assertTrue(torch.allclose(y1, y2, atol=a, rtol=r))
 
-    for p1, p2 in zip(net1.parameters(), net2.parameters()):
-        # transpose p1.grad because nn.Layer performs
-        # a forward pass as "x @ weight.t() + bias"
-        assert torch.allclose(p1.grad.t_(), p2.grad, atol=atol, rtol=rtol)
+        y1.backward(torch.ones_like(y1))
+        y2.backward(torch.ones_like(y2))
 
-    print(
-        "The test passed successfully.",
-        f"[dtype={dtype}, atol={atol:.0e}, rtol={rtol:.0e}]"
-    )
+        for p1, p2 in zip(net1.parameters(), net2.parameters()):
+            # transpose p1.grad because nn.Layer performs
+            # a forward pass as "x @ weight.t() + bias"
+            self.assertTrue(
+                torch.allclose(p1.grad.t_(), p2.grad, atol=a, rtol=r))
+
+    def test_float32(self):
+        self.generic_case(torch.float32)
+
+    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
+                     'Unsupported CUDA device.')
+    def test_float16(self):
+        self.generic_case(torch.float16)
+
+    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
+                     'Unsupported CUDA device.')
+    def test_float64(self):
+        self.generic_case(torch.float64)
 
 
 if __name__ == '__main__':
-    LinearFunction.up_backend()
-
-    test(torch.float32)
-
-    if torch.cuda.get_device_capability()[0] >= 7:
-        test(torch.float16)
-        test(torch.float64)
+    unittest.main()

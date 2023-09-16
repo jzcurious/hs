@@ -1,23 +1,21 @@
 import torch
 from torch.utils import cpp_extension
+import unittest
 
 
 class LinearFunction(torch.autograd.Function):
     @staticmethod
-    def up_backend(backend_impl=None):
-        if backend_impl is not None:
-            LinearFunction.backend = backend_impl
-        else:
-            LinearFunction.backend = cpp_extension.load(
-                name='my_extension',
-                sources=['hs/lab3/lab3.cu'],
-                extra_cuda_cflags=[
-                    '-std=c++17',
-                    '--extended-lambda',
-                    '-O3'
-                ],
-                extra_cflags=['-O3'],
-            )
+    def up_backend(backend_source='hs/lab3/lab3.cu'):
+        LinearFunction.backend = cpp_extension.load(
+            name='my_extension',
+            sources=backend_source,
+            extra_cuda_cflags=[
+                '-std=c++17',
+                '--extended-lambda',
+                '-O3'
+            ],
+            extra_cflags=['-O3'],
+        )
 
     @staticmethod
     def forward(ctx, input, weights, bias):
@@ -31,57 +29,68 @@ class LinearFunction(torch.autograd.Function):
         return d_input, d_weights, d_bias
 
 
-def test(dtype=torch.float32):
-    x = torch.rand((256, 1024), device='cuda', dtype=dtype, requires_grad=True)
-    w1 = torch.rand((1024, 17), device='cuda', dtype=dtype, requires_grad=True)
-    b1 = torch.rand((17, ), device='cuda', dtype=dtype, requires_grad=True)
-    w2 = torch.rand((17, 8), device='cuda', dtype=dtype, requires_grad=True)
-    b2 = torch.rand((8, ), device='cuda', dtype=dtype, requires_grad=True)
+class LabTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        LinearFunction.up_backend()
 
-    y = LinearFunction.apply(x, w1, b1)
-    z = LinearFunction.apply(y, w2, b2)
+    def generic_case(self, dtype):
+        factory_kwargs = {
+            'device': 'cuda',
+            'dtype': dtype,
+            'requires_grad': True
+        }
 
-    z.backward(torch.ones_like(z))
+        x = torch.rand((256, 1024), **factory_kwargs)
+        w1 = torch.rand((1024, 17), **factory_kwargs)
+        b1 = torch.rand((17, ), **factory_kwargs)
+        w2 = torch.rand((17, 8), **factory_kwargs)
+        b2 = torch.rand((8, ), **factory_kwargs)
 
-    x_ = x.detach().clone().requires_grad_()
-    w1_ = w1.detach().clone().requires_grad_()
-    b1_ = b1.detach().clone().requires_grad_()
-    w2_ = w2.detach().clone().requires_grad_()
-    b2_ = b2.detach().clone().requires_grad_()
+        y = LinearFunction.apply(x, w1, b1)
+        z = LinearFunction.apply(y, w2, b2)
 
-    y_ = x_ @ w1_ + b1_
-    z_ = y_ @ w2_ + b2_
+        z.backward(torch.ones_like(z))
 
-    z_.backward(torch.ones_like(z_))
+        x_ = x.detach().clone().requires_grad_()
+        w1_ = w1.detach().clone().requires_grad_()
+        b1_ = b1.detach().clone().requires_grad_()
+        w2_ = w2.detach().clone().requires_grad_()
+        b2_ = b2.detach().clone().requires_grad_()
 
-    match dtype:
-        case torch.float16 | torch.half:
-            atol = 1e-3
-            rtol = 1e-2
-        case _:
-            atol = 1e-5
-            rtol = 1e-4
+        y_ = x_ @ w1_ + b1_
+        z_ = y_ @ w2_ + b2_
 
-    assert torch.allclose(z_, z, atol=atol, rtol=rtol)
-    assert torch.allclose(x_.grad, x.grad, atol=atol, rtol=rtol)
-    assert torch.allclose(w1_.grad, w1.grad, atol=atol, rtol=rtol)
-    assert torch.allclose(b1_.grad, b1.grad, atol=atol, rtol=rtol)
-    assert torch.allclose(w2_.grad, w2.grad, atol=atol, rtol=rtol)
-    assert torch.allclose(b2_.grad, b2.grad, atol=atol, rtol=rtol)
+        z_.backward(torch.ones_like(z_))
 
-    print(
-        "The test passed successfully.",
-        f"[dtype={dtype}, atol={atol:.0e}, rtol={rtol:.0e}]"
-    )
+        match dtype:
+            case torch.float16 | torch.half:
+                a = 1e-3
+                r = 1e-2
+            case _:
+                a = 1e-5
+                r = 1e-4
+
+        self.assertTrue(torch.allclose(z_, z, atol=a, rtol=r))
+        self.assertTrue(torch.allclose(x_.grad, x.grad, atol=a, rtol=r))
+        self.assertTrue(torch.allclose(w1_.grad, w1.grad, atol=a, rtol=r))
+        self.assertTrue(torch.allclose(b1_.grad, b1.grad, atol=a, rtol=r))
+        self.assertTrue(torch.allclose(w2_.grad, w2.grad, atol=a, rtol=r))
+        self.assertTrue(torch.allclose(b2_.grad, b2.grad, atol=a, rtol=r))
+
+    def test_float32(self):
+        self.generic_case(torch.float32)
+
+    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
+                     'Unsupported CUDA device.')
+    def test_float16(self):
+        self.generic_case(torch.float16)
+
+    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
+                     'Unsupported CUDA device.')
+    def test_float64(self):
+        self.generic_case(torch.float64)
 
 
 if __name__ == '__main__':
-    torch.manual_seed(27)
-
-    LinearFunction.up_backend()
-
-    test(torch.float32)
-
-    if torch.cuda.get_device_capability()[0] >= 7:
-        test(torch.float16)
-        test(torch.float64)
+    unittest.main()

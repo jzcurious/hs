@@ -23,7 +23,7 @@ __forceinline__ int calc_grid_size(int m) {
 }
 
 
-torch::Tensor my_add(torch::Tensor a, torch::Tensor b) {
+torch::Tensor add(torch::Tensor a, torch::Tensor b) {
     CHECK_INPUT(a);
     CHECK_INPUT(b);
     CHECK_SIZE(a, b);
@@ -43,5 +43,5 @@ torch::Tensor my_add(torch::Tensor a, torch::Tensor b) {
 
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("my_add", &my_add, "Custom vector addition");
+    m.def("my_add", &add, "Custom vector addition");
 }

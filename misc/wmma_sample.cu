@@ -58,7 +58,7 @@ __forceinline__ unsigned int div_and_ceil(float x, float y) {
     #x " must be the same size by dim(" #d1 ") as " #y " by dim(" #d2 ")")
 
 #define CHECK_SIZE_FOR_WMMA(x, wmma_size) TORCH_CHECK( \
-    x.dim(0) % wmma_size == 0.0 and x.dim(1) % wmma_size == 0.0, \
+    x.size(0) % wmma_size == 0.0 and x.size(1) % wmma_size == 0.0, \
     #x " size by all dimensions must be multiples of " #wmma_size " for WMMMA")
 
 
@@ -83,13 +83,15 @@ torch::Tensor matmul_tensor_cores(
         matrix_a.options().dtype(torch::kFloat32)
     );
 
+    const int warp_size = 32;
+
     const dim3 block_size = {
         128, 4
     };
 
     dim3 grid_size = {
-        div_and_ceil((warpSize * M) / WMMA_SIZE, block_size.x),
-        div_and_ceil((warpSize * N) / WMMA_SIZE, block_size.y)
+        div_and_ceil((warp_size * M) / WMMA_SIZE, block_size.x),
+        div_and_ceil((warp_size * N) / WMMA_SIZE, block_size.y)
     };
     
     kernel_matmul_wmma<WMMA_SIZE, WMMA_SIZE, WMMA_SIZE><<<grid_size, block_size>>>(
