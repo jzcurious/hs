@@ -34,18 +34,23 @@ class LabTest(unittest.TestCase):
     def setUpClass(cls):
         LinearFunction.up_backend()
 
-    def generic_case(self, dtype):
-        factory_kwargs = {
+    def generic_case(self, dtype, verif=False):
+        tensor_opt = {
             'device': 'cuda',
             'dtype': dtype,
             'requires_grad': True
         }
 
-        x = torch.rand((256, 1024), **factory_kwargs)
-        w1 = torch.rand((1024, 17), **factory_kwargs)
-        b1 = torch.rand((17, ), **factory_kwargs)
-        w2 = torch.rand((17, 8), **factory_kwargs)
-        b2 = torch.rand((8, ), **factory_kwargs)
+        if verif:
+            init_method = torch.ones
+        else:
+            init_method = torch.rand
+
+        x = init_method((257, 1023), **tensor_opt)
+        w1 = init_method((1023, 132), **tensor_opt)
+        b1 = init_method((132, ), **tensor_opt)
+        w2 = init_method((132, 10), **tensor_opt)
+        b2 = init_method((10, ), **tensor_opt)
 
         y = LinearFunction.apply(x, w1, b1)
         z = LinearFunction.apply(y, w2, b2)
@@ -63,32 +68,47 @@ class LabTest(unittest.TestCase):
 
         z_.backward(torch.ones_like(z_))
 
-        match dtype:
-            case torch.float16 | torch.half:
-                a = 1e-3
-                r = 1e-2
-            case _:
-                a = 1e-5
-                r = 1e-4
+        # match (dtype, verif):
+        #     case (torch.float16, False):
+        #         tol = {'atol': 1e-4, 'rtol': 1e-3}
+        #     case (_, False):
+        #         tol = {'atol': 1e-5, 'rtol': 1e-4}
+        #     case (_, True):
+        #         tol = {'atol': 1e-8, 'rtol': 1e-5}
 
-        self.assertTrue(torch.allclose(z_, z, atol=a, rtol=r))
-        self.assertTrue(torch.allclose(x_.grad, x.grad, atol=a, rtol=r))
-        self.assertTrue(torch.allclose(w1_.grad, w1.grad, atol=a, rtol=r))
-        self.assertTrue(torch.allclose(b1_.grad, b1.grad, atol=a, rtol=r))
-        self.assertTrue(torch.allclose(w2_.grad, w2.grad, atol=a, rtol=r))
-        self.assertTrue(torch.allclose(b2_.grad, b2.grad, atol=a, rtol=r))
+        tol = {'atol': 1e-8, 'rtol': 1e-5}
 
-    def test_float32(self):
+        self.assertTrue(torch.allclose(z_, z, **tol))
+        self.assertTrue(torch.allclose(x_.grad, x.grad, **tol))
+        self.assertTrue(torch.allclose(w1_.grad, w1.grad, **tol))
+        self.assertTrue(torch.allclose(b1_.grad, b1.grad, **tol))
+        self.assertTrue(torch.allclose(w2_.grad, w2.grad, **tol))
+        self.assertTrue(torch.allclose(b2_.grad, b2.grad, **tol))
+
+    def test_verification_float32(self):
+        self.generic_case(torch.float32, verif=True)
+
+    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
+                     'Unsupported CUDA device.')
+    def test_verification_float16(self):
+        self.generic_case(torch.float16, verif=True)
+
+    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
+                     'Unsupported CUDA device.')
+    def test_verification_float64(self):
+        self.generic_case(torch.float64, verif=True)
+
+    def test_precision_float32(self):
         self.generic_case(torch.float32)
 
     @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
                      'Unsupported CUDA device.')
-    def test_float16(self):
+    def test_precision_float16(self):
         self.generic_case(torch.float16)
 
     @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
                      'Unsupported CUDA device.')
-    def test_float64(self):
+    def test_precision_float64(self):
         self.generic_case(torch.float64)
 
 

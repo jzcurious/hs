@@ -1,10 +1,9 @@
-from ..lab3.lab3 import LinearFunction
-from ..lab4.lab4 import LabTest as Lab4Test
+from ..lab3.lab3 import LinearFunction, LabTest as Lab3Test
 from torch.profiler import profile, ProfilerActivity
 import unittest
 
 
-class LabTest(Lab4Test):
+class LabTest(Lab3Test):
     @classmethod
     def setUpClass(cls):
         LinearFunction.up_backend('hs/lab6/lab6.cu')
@@ -30,11 +29,11 @@ def profile_test_case(test_case, row_limit=2):
 
 
 if __name__ == '__main__':
-    Lab4Test.setUpClass()
-    profile_test_case(Lab4Test())
+    Lab3Test.setUpClass()
+    profile_test_case(Lab3Test())
 
     LabTest.setUpClass()
     profile_test_case(LabTest())
 
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(LabTest)
-    unittest.TextTestRunner().run(suite)
+    unittest.TextTestRunner(verbosity=2).run(suite)

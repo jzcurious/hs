@@ -66,10 +66,13 @@ class LabTest(unittest.TestCase):
         y1 = net1(x)
         y2 = net2(x)
 
-        a = 1e-3
-        r = 1e-4
+        match dtype:
+            case torch.float16:
+                tol = {'atol': 1e-3, 'rtol': 1e-2}
+            case _:
+                tol = {'atol': 1e-5, 'rtol': 1e-4}
 
-        self.assertTrue(torch.allclose(y1, y2, atol=a, rtol=r))
+        self.assertTrue(torch.allclose(y1, y2, **tol))
 
         y1.backward(torch.ones_like(y1))
         y2.backward(torch.ones_like(y2))
@@ -78,7 +81,7 @@ class LabTest(unittest.TestCase):
             # transpose p1.grad because nn.Layer performs
             # a forward pass as "x @ weight.t() + bias"
             self.assertTrue(
-                torch.allclose(p1.grad.t_(), p2.grad, atol=a, rtol=r))
+                torch.allclose(p1.grad.t_(), p2.grad, **tol))
 
     def test_float32(self):
         self.generic_case(torch.float32)
