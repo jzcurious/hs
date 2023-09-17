@@ -39,7 +39,7 @@ class LabTest(unittest.TestCase):
         tensor_opt = {
             'device': 'cuda',
             'dtype': dtype,
-            'requires_grad': True
+            'requires_grad': backward
         }
 
         match (dtype, verif):
@@ -57,7 +57,7 @@ class LabTest(unittest.TestCase):
 
         if use_layout_wmma:
             x = init_method((256, 1024), **tensor_opt)
-            w1 = init_method((1024, 128), **tensor_opt)
+            w1 = init_method((1024, 64), **tensor_opt)
             b1 = init_method((64, ), **tensor_opt)
             w2 = init_method((64, 16), **tensor_opt)
             b2 = init_method((16, ), **tensor_opt)
@@ -86,8 +86,8 @@ class LabTest(unittest.TestCase):
         if not backward:
             return
 
-        z.backward(torch.ones_like(z))
         z_.backward(torch.ones_like(z_))
+        z.backward(torch.ones_like(z))
 
         self.assertTrue(torch.allclose(x_.grad, x.grad, **tol))
         self.assertTrue(torch.allclose(w1_.grad, w1.grad, **tol))

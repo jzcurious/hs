@@ -45,7 +45,8 @@ __global__ void linear_forward_kernel_wmma(
     wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, half, wmma::row_major> b_frag;
     wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, float> c_frag;
 
-    int warp_x = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
+    int thread_x = blockIdx.x * blockDim.x + threadIdx.x;
+    int warp_x = thread_x / warpSize;
     int warp_y = (blockIdx.y * blockDim.y + threadIdx.y);
 
     int input_row = warp_y * wmma_m;
@@ -82,12 +83,13 @@ __global__ void linear_forward_kernel_wmma(
 
     wmma::store_matrix_sync(ptr_c, c_frag, ldc, wmma::mem_row_major);
 
-    int thread_x = blockIdx.x * blockDim.x + threadIdx.x;
     int warp_offset_x = warp_x * warpSize;
+    int thread_x_tile = thread_x - warp_offset_x;
 
-    if (thread_x - warp_offset_x < wmma_n) {
+    if (thread_x_tile < wmma_n) {
         for (int i = 0; i < wmma_m; i++) {
-            output[input_row + i][thread_x] += static_cast<float>(bias[thread_x]);
+            output[input_row + i][weight_col + thread_x_tile] \
+                += static_cast<float>(bias[weight_col + thread_x_tile]);
         }
     }
 }
@@ -352,7 +354,7 @@ torch::Tensor linear_forward(
     torch::Tensor weight,
     torch::Tensor bias) {
 
-    if (typeid(input.scalar_type()) == typeid(c10::Half)) {
+    if (typeid(input.scalar_type()) == typeid(torch::kFloat16)) {
         try {
             return linear_forward_wmma(input, weight, bias);
         }

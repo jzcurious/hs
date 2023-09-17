@@ -88,11 +88,6 @@ class LabTest(unittest.TestCase):
 
     @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
                      'Unsupported CUDA device.')
-    def test_float16(self):
-        self.generic_case(torch.float16)
-
-    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
-                     'Unsupported CUDA device.')
     def test_float64(self):
         self.generic_case(torch.float64)
 

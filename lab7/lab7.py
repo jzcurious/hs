@@ -12,22 +12,22 @@ class LabTest(Lab3Test):
     @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
                      'Unsupported CUDA device.')
     def test_verification_float16(self):
-        self.generic_case(
+        super().generic_case(
             torch.float16, verif=True, use_layout_wmma=True, backward=False)
 
     @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
                      'Unsupported CUDA device.')
-    def test_float16(self):
+    def test_precision_float16(self):
         super().generic_case(
             torch.float16, verif=False, use_layout_wmma=True, backward=False)
 
 
 if __name__ == '__main__':
     Lab3Test.setUpClass()
-    profile_test_case(Lab3Test())
+    profile_test_case(Lab3Test(), row_limit=6)
 
     LabTest.setUpClass()
-    profile_test_case(LabTest())
+    profile_test_case(LabTest(), row_limit=6)
 
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(LabTest)
-    unittest.TextTestRunner().run(suite)
+    unittest.TextTestRunner(verbosity=2).run(suite)

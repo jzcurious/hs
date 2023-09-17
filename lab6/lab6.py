@@ -9,7 +9,7 @@ class LabTest(Lab3Test):
         LinearFunction.up_backend('hs/lab6/lab6.cu')
 
 
-def profile_test_case(test_case, row_limit=2):
+def profile_test_case(test_case, row_limit):
     test_set = [
         getattr(test_case, attr_name)
         for attr_name in dir(test_case) if 'test_' in attr_name
@@ -30,10 +30,10 @@ def profile_test_case(test_case, row_limit=2):
 
 if __name__ == '__main__':
     Lab3Test.setUpClass()
-    profile_test_case(Lab3Test())
+    profile_test_case(Lab3Test(), row_limit=4)
 
     LabTest.setUpClass()
-    profile_test_case(LabTest())
+    profile_test_case(LabTest(), row_limit=4)
 
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(LabTest)
     unittest.TextTestRunner(verbosity=2).run(suite)
