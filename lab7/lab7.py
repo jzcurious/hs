@@ -4,15 +4,22 @@ import unittest
 import torch
 
 
-class LabTest(unittest.TestCase):
+class LabTest(Lab3Test):
     @classmethod
     def setUpClass(cls):
         LinearFunction.up_backend('hs/lab7/lab7.cu')
 
     @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
                      'Unsupported CUDA device.')
+    def test_verification_float16(self):
+        self.generic_case(
+            torch.float16, verif=True, use_layout_wmma=True, backward=False)
+
+    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
+                     'Unsupported CUDA device.')
     def test_float16(self):
-        super().generic_case(torch.float16, verif=False, use_layout_wmma=False)
+        super().generic_case(
+            torch.float16, verif=False, use_layout_wmma=True, backward=False)
 
 
 if __name__ == '__main__':

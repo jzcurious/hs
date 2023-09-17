@@ -174,7 +174,7 @@ __global__ void linear_backward_kernel_shmem(
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_ARG(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 #define CHECK_COMPATIBILITY(x, y, d1, d2) \
-    TORCH_CHECK_LINALG(x.size(d1) == y.size(d2), \
+    TORCH_CHECK(x.size(d1) == y.size(d2), \
     #x " must be the same size by dim(" #d1 ") as " #y " by dim(" #d2 ")")
 
 
@@ -205,7 +205,7 @@ torch::Tensor linear_forward(
         div_and_ceil(weight.size(1), block_dim.z)
     };
 
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(),
         "linear_forward",
         ([&] {
@@ -250,7 +250,7 @@ std::vector<torch::Tensor> linear_backward(
         div_and_ceil(weight.size(1), block_dim.z)
     };
     
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.type(),
         "linear_backward",
         ([&] {

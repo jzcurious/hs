@@ -129,7 +129,7 @@ torch::Tensor linear_forward(
     std::tie(grid_size, block_size) = configure_grid(
         input.size(0), input.size(1), weight.size(1));
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES(
         input.scalar_type(),
         "linear_forward",
         ([&] {
@@ -170,7 +170,7 @@ std::vector<torch::Tensor> linear_backward(
     std::tie(grid_size, block_size) = configure_grid(
         input.size(0), input.size(1), weight.size(1));
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES(
         input.scalar_type(),
         "linear_backward",
         ([&] {

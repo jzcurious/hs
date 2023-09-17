@@ -34,12 +34,21 @@ class LabTest(unittest.TestCase):
     def setUpClass(cls):
         LinearFunction.up_backend()
 
-    def generic_case(self, dtype, verif=False, use_layout_wmma=False):
+    def generic_case(self, dtype, verif=False,
+                     use_layout_wmma=False, backward=True):
         tensor_opt = {
             'device': 'cuda',
             'dtype': dtype,
             'requires_grad': True
         }
+
+        match (dtype, verif):
+            case (torch.float16, False):
+                tol = {'atol': 1e-3, 'rtol': 1e-2}
+            case (_, False):
+                tol = {'atol': 1e-5, 'rtol': 1e-4}
+            case (_, True):
+                tol = {'atol': 1e-8, 'rtol': 1e-5}
 
         if verif:
             init_method = torch.ones
@@ -62,8 +71,6 @@ class LabTest(unittest.TestCase):
         y = LinearFunction.apply(x, w1, b1)
         z = LinearFunction.apply(y, w2, b2)
 
-        z.backward(torch.ones_like(z))
-
         x_ = x.detach().clone().requires_grad_()
         w1_ = w1.detach().clone().requires_grad_()
         b1_ = b1.detach().clone().requires_grad_()
@@ -73,17 +80,15 @@ class LabTest(unittest.TestCase):
         y_ = x_ @ w1_ + b1_
         z_ = y_ @ w2_ + b2_
 
+        with torch.no_grad():
+            self.assertTrue(torch.allclose(z_, z, **tol))
+
+        if not backward:
+            return
+
+        z.backward(torch.ones_like(z))
         z_.backward(torch.ones_like(z_))
 
-        match (dtype, verif):
-            case (torch.float16, False):
-                tol = {'atol': 1e-3, 'rtol': 1e-2}
-            case (_, False):
-                tol = {'atol': 1e-5, 'rtol': 1e-4}
-            case (_, True):
-                tol = {'atol': 1e-8, 'rtol': 1e-5}
-
-        self.assertTrue(torch.allclose(z_, z, **tol))
         self.assertTrue(torch.allclose(x_.grad, x.grad, **tol))
         self.assertTrue(torch.allclose(w1_.grad, w1.grad, **tol))
         self.assertTrue(torch.allclose(b1_.grad, b1.grad, **tol))
@@ -95,21 +100,11 @@ class LabTest(unittest.TestCase):
 
     @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
                      'Unsupported CUDA device.')
-    def test_verification_float16(self):
-        self.generic_case(torch.float16, verif=True)
-
-    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
-                     'Unsupported CUDA device.')
     def test_verification_float64(self):
         self.generic_case(torch.float64, verif=True)
 
     def test_precision_float32(self):
         self.generic_case(torch.float32)
-
-    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
-                     'Unsupported CUDA device.')
-    def test_precision_float16(self):
-        self.generic_case(torch.float16)
 
     @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
                      'Unsupported CUDA device.')
