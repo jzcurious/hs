@@ -9,8 +9,10 @@ class LabTest(unittest.TestCase):
     def setUpClass(cls):
         LinearFunction.up_backend('hs/lab7/lab7.cu')
 
+    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
+                     'Unsupported CUDA device.')
     def test_float16(self):
-        Lab3Test.test_float16(torch.float16)
+        super().generic_case(torch.float16, verif=False, use_layout_wmma=False)
 
 
 if __name__ == '__main__':

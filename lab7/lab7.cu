@@ -94,6 +94,66 @@ __global__ void linear_forward_kernel_wmma(
 
 
 template <int batch_size, int weight_rows, int weight_cols, typename scalar_t>
+__global__ void linear_forward_kernel_shmem(
+    const accessor_2d<scalar_t> input,
+    const accessor_2d<scalar_t> weight,
+    const accessor_1d<scalar_t> bias,
+    accessor_2d<scalar_t> output) {
+
+    __shared__ scalar_t local_input[batch_size][weight_rows];   // 32: 128b .. 256b
+    __shared__ scalar_t local_weight[weight_rows][weight_cols]; // 32: 128b .. 256b
+    __shared__ scalar_t local_bias[weight_cols];                //  4: 16b  ..  32b
+    __shared__ scalar_t local_output[batch_size][weight_cols];  // 16: 64b  .. 128b
+
+    auto k = blockIdx.x * blockDim.x + threadIdx.x;
+    auto i = blockIdx.y * blockDim.y + threadIdx.y;
+    auto j = blockIdx.z * blockDim.z + threadIdx.z;
+
+    auto l_k = threadIdx.x;
+    auto l_i = threadIdx.y;
+    auto l_j = threadIdx.z;
+
+    bool guard = i < weight.size(0) and j < weight.size(1) and k < input.size(0);
+
+    if (guard) {
+        if (l_j == 0) {
+            local_input[l_k][l_i] = input[k][i];
+        }
+
+        if (l_k == 0) {
+            local_weight[l_i][l_j] = weight[i][j];
+        }
+
+        if (l_k == 0 and l_i == 0) {
+            local_bias[l_j] = bias[j];
+        }
+
+        if (l_i == 0) {
+            local_output[l_k][l_j] = 0;
+        }
+    }
+
+    __syncthreads();
+
+    if (guard) {
+        auto part = local_input[l_k][l_i] * local_weight[l_i][l_j];
+
+        if (i == 0) {
+           part += local_bias[l_j];
+        }
+        
+        gpuAtomicAdd(&local_output[l_k][l_j], part);
+    }
+
+    __syncthreads();
+
+    if (guard and l_i == 0) {
+        gpuAtomicAdd(&output[k][j], local_output[l_k][l_j]);
+    }
+}
+
+
+template <int batch_size, int weight_rows, int weight_cols, typename scalar_t>
 __global__ void linear_backward_kernel_shmem(
     const accessor_2d<scalar_t> input,
     const accessor_2d<scalar_t> weight,
@@ -176,22 +236,22 @@ __global__ void linear_backward_kernel_shmem(
 #define CHECK_ARG(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
 #define CHECK_COMPATIBILITY(x, y, d1, d2) \
-    TORCH_CHECK(x.size(d1) == y.size(d2), \
+    TORCH_CHECK_LINALG(x.size(d1) == y.size(d2), \
     #x " must be the same size by dim(" #d1 ") as " #y " by dim(" #d2 ")")
 
-#define CHECK_SIZE_FOR_WMMA_A_M(a, wmma_m) TORCH_CHECK( \
+#define CHECK_SIZE_FOR_WMMA_A_M(a, wmma_m) TORCH_CHECK_VALUE( \
     a.size(0) % wmma_m == 0.0, \
     #a " size by all dimensions must be multiples of " #wmma_m " for WMMMA")
 
-#define CHECK_SIZE_FOR_WMMA_A_K(a, wmma_k) TORCH_CHECK( \
+#define CHECK_SIZE_FOR_WMMA_A_K(a, wmma_k) TORCH_CHECK_VALUE( \
     a.size(1) % wmma_k == 0.0, \
     #a " size by all dimensions must be multiples of " #wmma_k " for WMMMA")
 
-#define CHECK_SIZE_FOR_WMMA_B_K(b, wmma_k) TORCH_CHECK( \
+#define CHECK_SIZE_FOR_WMMA_B_K(b, wmma_k) TORCH_CHECK_VALUE( \
     b.size(0) % wmma_k == 0.0, \
     #b " size by all dimensions must be multiples of " #wmma_k " for WMMMA")
 
-#define CHECK_SIZE_FOR_WMMA_B_N(b, wmma_n) TORCH_CHECK( \
+#define CHECK_SIZE_FOR_WMMA_B_N(b, wmma_n) TORCH_CHECK_VALUE( \
     b.size(1) % wmma_n == 0.0, \
     #b " size by all dimensions must be multiples of " #wmma_n " for WMMMA")
 
@@ -205,7 +265,7 @@ __forceinline__ unsigned int div_and_ceil(float x, float y) {
 }
 
 
-torch::Tensor linear_forward(
+torch::Tensor linear_forward_wmma(
     torch::Tensor input,
     torch::Tensor weight,
     torch::Tensor bias) {
@@ -245,6 +305,64 @@ torch::Tensor linear_forward(
     );
 
     return output.toType(torch::kFloat16);
+}
+
+
+torch::Tensor linear_forward_no_wmma(
+    torch::Tensor input,
+    torch::Tensor weight,
+    torch::Tensor bias) {
+
+    CHECK_ARG(input);
+    CHECK_ARG(weight);
+    CHECK_ARG(bias);
+
+    CHECK_COMPATIBILITY(input, weight, 1, 0);
+    CHECK_COMPATIBILITY(bias, weight, 0, 1);
+
+    auto output = torch::zeros({input.size(0), weight.size(1)}, input.options());
+
+    constexpr dim3 block_dim = {4, 8, 4};
+
+    const dim3 grid_dim = {
+        div_and_ceil(input.size(0), block_dim.x),
+        div_and_ceil(input.size(1), block_dim.y),
+        div_and_ceil(weight.size(1), block_dim.z)
+    };
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        input.scalar_type(),
+        "linear_forward",
+        ([&] {
+            linear_forward_kernel_shmem<block_dim.x, block_dim.y, block_dim.z><<<grid_dim, block_dim>>>(
+                input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                bias.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
+                output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
+            );
+        })
+    );
+
+    return output;
+}
+
+
+torch::Tensor linear_forward(
+    torch::Tensor input,
+    torch::Tensor weight,
+    torch::Tensor bias) {
+
+    if (typeid(input.scalar_type()) == typeid(c10::Half)) {
+        try {
+            return linear_forward_wmma(input, weight, bias);
+        }
+        catch (const torch::ValueError& e) {
+            return linear_forward_no_wmma(input, weight, bias);
+        }
+    } 
+    else {
+        return linear_forward_no_wmma(input, weight, bias);
+    }
 }
 
 

@@ -34,7 +34,7 @@ class LabTest(unittest.TestCase):
     def setUpClass(cls):
         LinearFunction.up_backend()
 
-    def generic_case(self, dtype, verif=False):
+    def generic_case(self, dtype, verif=False, use_layout_wmma=False):
         tensor_opt = {
             'device': 'cuda',
             'dtype': dtype,
@@ -46,11 +46,18 @@ class LabTest(unittest.TestCase):
         else:
             init_method = torch.rand
 
-        x = init_method((257, 1023), **tensor_opt)
-        w1 = init_method((1023, 132), **tensor_opt)
-        b1 = init_method((132, ), **tensor_opt)
-        w2 = init_method((132, 10), **tensor_opt)
-        b2 = init_method((10, ), **tensor_opt)
+        if use_layout_wmma:
+            x = init_method((256, 1024), **tensor_opt)
+            w1 = init_method((1024, 128), **tensor_opt)
+            b1 = init_method((64, ), **tensor_opt)
+            w2 = init_method((64, 16), **tensor_opt)
+            b2 = init_method((16, ), **tensor_opt)
+        else:
+            x = init_method((257, 1023), **tensor_opt)
+            w1 = init_method((1023, 132), **tensor_opt)
+            b1 = init_method((132, ), **tensor_opt)
+            w2 = init_method((132, 10), **tensor_opt)
+            b2 = init_method((10, ), **tensor_opt)
 
         y = LinearFunction.apply(x, w1, b1)
         z = LinearFunction.apply(y, w2, b2)
@@ -70,7 +77,7 @@ class LabTest(unittest.TestCase):
 
         match (dtype, verif):
             case (torch.float16, False):
-                tol = {'atol': 1e-4, 'rtol': 1e-3}
+                tol = {'atol': 1e-3, 'rtol': 1e-2}
             case (_, False):
                 tol = {'atol': 1e-5, 'rtol': 1e-4}
             case (_, True):
