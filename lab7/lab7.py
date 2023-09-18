@@ -1,33 +1,25 @@
-from ..lab3.lab3 import LinearFunction, LabTest as Lab3Test
-from ..lab6.lab6 import profile_test_case
-import unittest
+from ..lab3.lab3 import GenericTestCase, TestCaseFactory
+from ..lab6.lab6 import run_test_with_profiler
 import torch
 
 
-class LabTest(Lab3Test):
-    @classmethod
-    def setUpClass(cls):
-        LinearFunction.up_backend('hs/lab7/lab7.cu')
+class Lab3TestCase(
+    GenericTestCase, metaclass=TestCaseFactory,
+    dtypes=[torch.float64, torch.float32, torch.float16],
+    verif=True, backward=False, backend='hs/lab3/lab3.cu', wmma=True
+):
 
-    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
-                     'Unsupported CUDA device.')
-    def test_verification_float16(self):
-        super().generic_case(
-            torch.float16, verif=True, use_layout_wmma=True, backward=False)
+    pass
 
-    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
-                     'Unsupported CUDA device.')
-    def test_precision_float16(self):
-        super().generic_case(
-            torch.float16, verif=False, use_layout_wmma=True, backward=False)
+
+class Lab7TestCase(
+    GenericTestCase, metaclass=TestCaseFactory,
+    dtypes=[torch.float64, torch.float32, torch.float16],
+    verif=True, backward=False, backend='hs/lab7/lab7.cu', wmma=True
+):
+
+    pass
 
 
 if __name__ == '__main__':
-    Lab3Test.setUpClass()
-    profile_test_case(Lab3Test(), row_limit=6)
-
-    LabTest.setUpClass()
-    profile_test_case(LabTest(), row_limit=6)
-
-    suite = unittest.defaultTestLoader.loadTestsFromTestCase(LabTest)
-    unittest.TextTestRunner(verbosity=2).run(suite)
+    run_test_with_profiler(Lab3TestCase, Lab7TestCase, row_limit=12)

@@ -29,13 +29,16 @@ class LinearFunction(torch.autograd.Function):
         return d_input, d_weights, d_bias
 
 
-class LabTest(unittest.TestCase):
+class GenericTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        LinearFunction.up_backend()
+        LinearFunction.up_backend(cls.backend)
 
-    def generic_case(self, dtype, verif=False,
-                     use_layout_wmma=False, backward=True):
+    def _test_generic(self, dtype, verif, backward):
+        if (dtype in [torch.float16, torch.float64]
+                and torch.cuda.get_device_capability()[0] < 7):
+            self.skipTest('Unsupported CUDA device.')
+
         tensor_opt = {
             'device': 'cuda',
             'dtype': dtype,
@@ -55,7 +58,7 @@ class LabTest(unittest.TestCase):
         else:
             init_method = torch.rand
 
-        if use_layout_wmma:
+        if self.wmma:
             x = init_method((256, 1024), **tensor_opt)
             w1 = init_method((1024, 64), **tensor_opt)
             b1 = init_method((64, ), **tensor_opt)
@@ -95,21 +98,50 @@ class LabTest(unittest.TestCase):
         self.assertTrue(torch.allclose(w2_.grad, w2.grad, **tol))
         self.assertTrue(torch.allclose(b2_.grad, b2.grad, **tol))
 
-    def test_verification_float32(self):
-        self.generic_case(torch.float32, verif=True)
 
-    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
-                     'Unsupported CUDA device.')
-    def test_verification_float64(self):
-        self.generic_case(torch.float64, verif=True)
+class TestCaseFactory(type):
+    def __new__(cls, name, base, attrs, **kwargs):
+        assert GenericTestCase in base
+        attrs.update(kwargs)
+        TestCaseFactory.__add_tests(attrs, **kwargs)
+        return super().__new__(cls, name, base, attrs)
 
-    def test_precision_float32(self):
-        self.generic_case(torch.float32)
+    @staticmethod
+    def __add_test(attrs, backend, dtype, wmma, verif, backward):
+        method_name = TestCaseFactory.__generate_test_name(
+            backend, dtype, wmma, verif, backward
+        )
+        attrs[method_name] = \
+            (lambda self, d=dtype, v=verif, b=backward:
+                GenericTestCase._test_generic(self, d, v, b))
 
-    @unittest.skipIf(torch.cuda.get_device_capability()[0] < 7,
-                     'Unsupported CUDA device.')
-    def test_precision_float64(self):
-        self.generic_case(torch.float64)
+    @staticmethod
+    def __add_tests(attrs, backend, dtypes, wmma, verif, backward):
+        for dtype in dtypes:
+            TestCaseFactory.__add_test(
+                attrs, backend, dtype, wmma, False, backward)
+
+            if verif:
+                TestCaseFactory.__add_test(
+                    attrs, backend, dtype, wmma, verif, backward)
+
+    @staticmethod
+    def __generate_test_name(backend, dtype, wmma, verif, backward):
+        dtype_lb = str(dtype).split('.')[-1]
+        wmma_lb = 'wmma' if wmma and dtype is torch.float16 else ''
+        verif_lb = 'verif' if verif else 'prec'
+        backend_lb = backend.split('/')[-1].replace('.', '_')
+        bkwd_lb = 'forward_backward' if backward else 'forward'
+        return f'test_{backend_lb}_{dtype_lb}_{wmma_lb}_{verif_lb}_{bkwd_lb}'
+
+
+class Lab3TestCase(
+    GenericTestCase, metaclass=TestCaseFactory,
+    dtypes=[torch.float64, torch.float32, torch.float16],
+    verif=True, backward=True, backend='hs/lab3/lab3.cu', wmma=False
+):
+
+    pass
 
 
 if __name__ == '__main__':
