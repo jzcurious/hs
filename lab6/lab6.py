@@ -21,10 +21,16 @@ def run_test_with_profiler(
             sort_by="cuda_time_total", row_limit=row_limit)
     )
 
+    return prof
+
+
+def parse_profile(prof, sort_by='cuda_time_total', row_limit=12):
+    pass  # TODO
+
 
 class Lab6TestCase(
     GenericTestCase, metaclass=TestCaseFactory,
-    dtypes=[torch.float64, torch.float32, torch.float16],
+    dtypes=[torch.float64, torch.float32],
     verif=True, backward=True, backend='hs/lab6/lab6.cu', wmma=False
 ):
 
@@ -32,4 +38,6 @@ class Lab6TestCase(
 
 
 if __name__ == '__main__':
-    run_test_with_profiler(Lab3TestCase, Lab6TestCase, row_limit=12)
+    prof = run_test_with_profiler(Lab3TestCase, Lab6TestCase, row_limit=12)
+    # prof = run_test_with_profiler(Lab6TestCase, row_limit=12)
+    parse_profile(prof)

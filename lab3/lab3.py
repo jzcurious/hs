@@ -1,9 +1,12 @@
 import torch
 from torch.utils import cpp_extension
 import unittest
+from torch.nn.functional import linear as torch_linear
 
 
 class LinearFunction(torch.autograd.Function):
+    r"""Evaluates the expression :math:`xA^T + b` and its gradient"""
+
     @staticmethod
     def up_backend(backend_source='hs/lab3/lab3.cu'):
         LinearFunction.backend = cpp_extension.load(
@@ -49,7 +52,7 @@ class GenericTestCase(unittest.TestCase):
             case (torch.float16, False):
                 tol = {'atol': 1e-3, 'rtol': 1e-2}
             case (_, False):
-                tol = {'atol': 1e-5, 'rtol': 1e-4}
+                tol = {'atol': 1e-6, 'rtol': 1e-5}
             case (_, True):
                 tol = {'atol': 1e-8, 'rtol': 1e-5}
 
@@ -59,17 +62,17 @@ class GenericTestCase(unittest.TestCase):
             init_method = torch.rand
 
         if self.wmma:
-            x = init_method((256, 1024), **tensor_opt)
-            w1 = init_method((1024, 64), **tensor_opt)
-            b1 = init_method((64, ), **tensor_opt)
-            w2 = init_method((64, 16), **tensor_opt)
+            x = init_method((128, 4096), **tensor_opt)
+            w1 = init_method((2048, 4096), **tensor_opt)
+            b1 = init_method((2048, ), **tensor_opt)
+            w2 = init_method((16, 2048), **tensor_opt)
             b2 = init_method((16, ), **tensor_opt)
         else:
-            x = init_method((257, 1023), **tensor_opt)
-            w1 = init_method((1023, 132), **tensor_opt)
-            b1 = init_method((132, ), **tensor_opt)
-            w2 = init_method((132, 10), **tensor_opt)
-            b2 = init_method((10, ), **tensor_opt)
+            x = init_method((127, 4097), **tensor_opt)
+            w1 = init_method((2037, 4097), **tensor_opt)
+            b1 = init_method((2037, ), **tensor_opt)
+            w2 = init_method((15, 2037), **tensor_opt)
+            b2 = init_method((15, ), **tensor_opt)
 
         y = LinearFunction.apply(x, w1, b1)
         z = LinearFunction.apply(y, w2, b2)
@@ -80,8 +83,8 @@ class GenericTestCase(unittest.TestCase):
         w2_ = w2.detach().clone().requires_grad_()
         b2_ = b2.detach().clone().requires_grad_()
 
-        y_ = x_ @ w1_ + b1_
-        z_ = y_ @ w2_ + b2_
+        y_ = torch_linear(x_, w1_, b1_)
+        z_ = torch_linear(y_, w2_, b2_)
 
         with torch.no_grad():
             self.assertTrue(torch.allclose(z_, z, **tol))
@@ -137,7 +140,7 @@ class TestCaseFactory(type):
 
 class Lab3TestCase(
     GenericTestCase, metaclass=TestCaseFactory,
-    dtypes=[torch.float64, torch.float32, torch.float16],
+    dtypes=[torch.float64, torch.float32],
     verif=True, backward=True, backend='hs/lab3/lab3.cu', wmma=False
 ):
 

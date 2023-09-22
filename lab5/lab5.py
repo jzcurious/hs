@@ -4,8 +4,9 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision import datasets
 import torch.optim as optim
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from ..lab4.lab4 import Linear
+from ..lab3.lab3 import LinearFunction
 
 
 class MyNet(nn.Module):
@@ -132,21 +133,38 @@ def eval_valid_set_accuracy(net, test_data, device):
     return accuracy
 
 
+def check_loss_value(loss):
+    with torch.no_grad():
+        if loss.isinf() or loss.isnan():
+            raise ValueError('Invalid loss.')
+
+
 def train_iteration(
     train_data, test_data,
     net, epochs,
     lr=0.005, device='cuda:0',
     bar_label='', prev_epochs=0,
-    best_valid_accuracy=0.0
+    best_valid_accuracy=0,
+    learning_time_validation=False,
+    accuracy_history=False,
+    make_checkpoints=False
 ):
+    ret = {}
+
+    if accuracy_history:
+        train_accuracy = torch.zeros((epochs,), device=device)
+        ret['train_accuracy'] = train_accuracy
+
+    if learning_time_validation:
+        valid_accuracy = torch.zeros((epochs,), device=device)
+        ret['valid_accuracy'] = valid_accuracy
+
     net.to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9)
 
     total_epochs = prev_epochs + epochs
-    train_accuracy = torch.zeros((epochs,), device=device)
-    valid_accuracy = torch.zeros((epochs,), device=device)
 
     if not bar_label:
         bar_label = 'Train'
@@ -166,23 +184,32 @@ def train_iteration(
                 y_ = net(x)
                 loss = criterion(y_, y)
 
+                check_loss_value(loss)
+
                 loss.backward()
                 optimizer.step()
 
-                train_accuracy[e] += (
-                    test_accuracy(y_, y, len(train_data))
-                )
+                if accuracy_history:
+                    train_accuracy[e] += (
+                        test_accuracy(y_, y, len(train_data))
+                    )
 
                 epoch.set_postfix(loss=loss.item())
 
-            valid_accuracy[e] = \
-                eval_valid_set_accuracy(net, test_data, device).item()
+            if learning_time_validation or make_checkpoints:
+                valid_accuracy[e] = \
+                    eval_valid_set_accuracy(net, test_data, device).item()
 
-            if best_valid_accuracy < valid_accuracy[e]:
-                best_valid_accuracy = valid_accuracy[e]
-                torch.save(net.state_dict(), 'best_model.pt')
+            if make_checkpoints:
+                if best_valid_accuracy < valid_accuracy[e]:
+                    best_valid_accuracy = valid_accuracy[e]
+                    torch.save(net.state_dict(), 'best_model.pt')
 
-    return train_accuracy, valid_accuracy, best_valid_accuracy
+    if make_checkpoints:
+        ret['best_valid_accuracy'] = best_valid_accuracy
+
+    if ret:
+        return ret
 
 
 def test(net, test_data, num_classes,
@@ -191,8 +218,9 @@ def test(net, test_data, num_classes,
     t = torch.zeros(num_classes, device=device)
     f = torch.zeros(num_classes, device=device)
 
-    torch.save(net.state_dict(), 'model.pt')
-    net.load_state_dict(torch.load('best_model.pt'))
+    if use_best_model:
+        torch.save(net.state_dict(), 'model.pt')
+        net.load_state_dict(torch.load('best_model.pt'))
 
     net.to(device)
 
@@ -217,18 +245,21 @@ def test(net, test_data, num_classes,
     if training_mode:
         net.train()
 
-    net.load_state_dict(torch.load('model.pt'))
+    if use_best_model:
+        net.load_state_dict(torch.load('model.pt'))
 
     return acc
 
 
 if __name__ == '__main__':
     train_data, test_data = prepare_cifar10()
+
+    LinearFunction.up_backend('hs/lab3/lab3.cu')
     net = MyNet(num_classes=10)
 
-    train_iteration(train_data, test_data, net, epochs=1, lr=0.02)
+    train_iteration(train_data, test_data, net, epochs=16, lr=0.04)
 
-    valid_accuracy_cls = test(net)
+    valid_accuracy_cls = test(net, test_data, num_classes=10)
 
     print('\nAccuracy (valid)')
     print(f'  min: {valid_accuracy_cls.min().item():.0f}%')

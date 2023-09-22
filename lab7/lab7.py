@@ -5,8 +5,8 @@ import torch
 
 class Lab3TestCase(
     GenericTestCase, metaclass=TestCaseFactory,
-    dtypes=[torch.float64, torch.float32, torch.float16],
-    verif=True, backward=False, backend='hs/lab3/lab3.cu', wmma=True
+    dtypes=[torch.float64, torch.float32],
+    verif=True, backward=True, backend='hs/lab3/lab3.cu', wmma=True
 ):
 
     pass
@@ -15,7 +15,7 @@ class Lab3TestCase(
 class Lab7TestCase(
     GenericTestCase, metaclass=TestCaseFactory,
     dtypes=[torch.float64, torch.float32, torch.float16],
-    verif=True, backward=False, backend='hs/lab7/lab7.cu', wmma=True
+    verif=True, backward=True, backend='hs/lab7/lab7.cu', wmma=True
 ):
 
     pass

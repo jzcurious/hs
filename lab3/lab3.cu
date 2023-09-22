@@ -43,10 +43,14 @@ __global__ void linear_forward_kernel(
     auto i = blockIdx.y * blockDim.y + threadIdx.y;
     auto j = blockIdx.z * blockDim.z + threadIdx.z;
 
-    bool guard = i < weight.size(0) and j < weight.size(1) and k < input.size(0);
+    auto batch_size = input.size(0);
+    auto weight_t_rows = weight.size(1);
+    auto weight_t_cols = weight.size(0);
+
+    bool guard = k < batch_size and i < weight_t_rows and j < weight_t_cols;
 
     if (guard) {
-        auto part = input[k][i] * weight[i][j];
+        auto part = input[k][i] * weight[j][i];
 
         if (i == 0) {
            part += bias[j];
@@ -70,11 +74,15 @@ __global__ void linear_backward_kernel(
     auto i = blockIdx.y * blockDim.y + threadIdx.y;
     auto j = blockIdx.z * blockDim.z + threadIdx.z;
 
-    bool guard = i < weight.size(0) and j < weight.size(1) and k < input.size(0);
+    auto batch_size = input.size(0);
+    auto weight_t_rows = weight.size(1);
+    auto weight_t_cols = weight.size(0);
+
+    bool guard = k < batch_size and i < weight_t_rows and j < weight_t_cols;
 
     if (guard) {
-        gpuAtomicAdd(&d_input[k][i], d_output[k][j] * weight[i][j]);
-        gpuAtomicAdd(&d_weight[i][j], d_output[k][j] * input[k][i]);
+        gpuAtomicAdd(&d_input[k][i], d_output[k][j] * weight[j][i]);
+        gpuAtomicAdd(&d_weight[j][i], d_output[k][j] * input[k][i]);
 
         if (i == 0) {
             gpuAtomicAdd(&d_bias[j], d_output[k][j]);
@@ -120,14 +128,21 @@ torch::Tensor linear_forward(
     CHECK_ARG(weight);
     CHECK_ARG(bias);
 
-    CHECK_COMPATIBILITY(input, weight, 1, 0);
-    CHECK_COMPATIBILITY(bias, weight, 0, 1);
+    CHECK_COMPATIBILITY(input, weight, 1, 1);
+    CHECK_COMPATIBILITY(bias, weight, 0, 0);
 
-    auto output = torch::zeros({input.size(0), weight.size(1)}, input.options());
+    auto batch_size = input.size(0);
+    auto weight_t_rows = weight.size(1);
+    auto weight_t_cols = weight.size(0);
+
+    auto output = torch::zeros(
+        {batch_size, weight_t_cols},
+        input.options()
+    );
 
     dim3 grid_size, block_size;
     std::tie(grid_size, block_size) = configure_grid(
-        input.size(0), input.size(1), weight.size(1));
+        batch_size, weight_t_rows, weight_t_cols);
 
     AT_DISPATCH_FLOATING_TYPES(
         input.scalar_type(),
@@ -157,10 +172,14 @@ std::vector<torch::Tensor> linear_backward(
     CHECK_ARG(bias);
     CHECK_ARG(d_output);
 
-    CHECK_COMPATIBILITY(input, weight, 1, 0);
-    CHECK_COMPATIBILITY(bias, weight, 0, 1);
-    CHECK_COMPATIBILITY(d_output, weight, 1, 1);
+    CHECK_COMPATIBILITY(input, weight, 1, 1);
+    CHECK_COMPATIBILITY(bias, weight, 0, 0);
+    CHECK_COMPATIBILITY(d_output, weight, 1, 0);
     CHECK_COMPATIBILITY(d_output, bias, 1, 0);
+
+    auto batch_size = input.size(0);
+    auto weight_t_rows = weight.size(1);
+    auto weight_t_cols = weight.size(0);
 
     auto d_input = torch::zeros_like(input);
     auto d_weight = torch::zeros_like(weight);
@@ -168,7 +187,7 @@ std::vector<torch::Tensor> linear_backward(
 
     dim3 grid_size, block_size;
     std::tie(grid_size, block_size) = configure_grid(
-        input.size(0), input.size(1), weight.size(1));
+        batch_size, weight_t_rows, weight_t_rows);
 
     AT_DISPATCH_FLOATING_TYPES(
         input.scalar_type(),

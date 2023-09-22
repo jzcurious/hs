@@ -144,74 +144,38 @@ __global__ void linear_backward_kernel_wmma(
     int weight_t_col = warp_x * wmma_n; // i
     int input_t_row = weight_t_col;     // i
 
-    if (weight_t_col >= weight.size(0)) {
-        return; // crop by max size C
+    if (d_output_row >= d_output.size(0) or weight_t_col >= weight.size(0)) {
+        return;
     }
 
     wmma::fill_fragment(d_input_c_frag, 0.0f);
     wmma::fill_fragment(d_weight_c_frag, 0.0f);
 
-    int ld_d_output = d_output.size(1);  // K, j
-    int ld_weight = weight.size(1);      // K, j
-    int ld_d_input = weight.size(0);     // N, i
-    int ld_input = input.size(1);        // M, i
-    int ld_d_weight = weight.size(1);    // N, j
+    int lda = d_output.size(1);  // K
+    int ldb = weight.size(1);    // N
+    int ldc = weight.size(0);    // K
 
-    int max_lda = max(d_output.size(0), d_output.size(1));
+    for (int k = 0; k < lda; k += wmma_k) {
+        int d_output_col = k;
+        int weight_t_row = k;
 
-    for (int k = 0; k < max_lda; k += wmma_k) {
-        if (k < d_output.size(1)) { // + crop by size C
-             /* dY @ W^T */ 
+        half* ptr_d_output = reinterpret_cast<half*>(d_output.data()) \
+            + lda * d_output_row + d_output_col;
+        
+        half* ptr_weight_t = reinterpret_cast<half*>(weight.data()) \
+            + ldb * weight_t_col + weight_t_row;
 
-            int d_output_col = k;
-            int weight_t_row = k;
+        wmma::load_matrix_sync(d_output_a_frag, ptr_d_output, lda);
+        wmma::load_matrix_sync(weight_t_b_frag, ptr_weight_t, ldb);
 
-            half* ptr_d_output = reinterpret_cast<half*>(d_output.data()) \
-                + ld_d_output * d_output_row + d_output_col;
-            
-            half* ptr_weight_t = reinterpret_cast<half*>(weight.data()) \
-                + ld_weight * weight_t_col + weight_t_row;
-
-            wmma::load_matrix_sync(d_output_a_frag, ptr_d_output, ld_d_output);
-            wmma::load_matrix_sync(weight_t_b_frag, ptr_weight_t, ld_weight);
-
-            wmma::mma_sync(
-                d_input_c_frag, d_output_a_frag, weight_t_b_frag, d_input_c_frag);
-        }
-
-        if (k < d_output.size(0)) { // + crop by size C
-            /* X^T @ dY */
-
-            int input_t_col = k;
-            int d_output_row = k;
-
-            half* ptr_d_output = reinterpret_cast<half*>(d_output.data()) \
-                + ld_d_output * d_output_row + d_output_col;
-
-            half* ptr_input_t = reinterpret_cast<half*>(input.data()) \
-                + ld_input * input_t_col + input_t_row;
-
-            wmma::load_matrix_sync(input_t_a_frag, ptr_input_t, ld_input);
-            wmma::load_matrix_sync(d_output_b_frag, ptr_d_output, ld_d_output);
-
-            wmma::mma_sync(
-                d_weight_c_frag, input_t_a_frag, d_output_b_frag, d_weight_c_frag);
-        }
+        wmma::mma_sync(
+            d_input_c_frag, d_output_a_frag, weight_t_b_frag, d_input_c_frag);
     }
 
-    // + crop by size C
     float* ptr_d_input = d_input.data() \
-        + ld_d_input * warp_y * wmma_m + warp_x * wmma_n;
+        + ldc * warp_y * wmma_m + warp_x * wmma_n;
 
-    wmma::store_matrix_sync(
-        ptr_d_input, d_input_c_frag, ld_d_input, wmma::mem_row_major);
-
-    // + crop by size C
-    float* ptr_d_weight = d_weight.data() \
-        + ld_d_weight * warp_y * wmma_m + warp_x * wmma_n;
-
-    wmma::store_matrix_sync(
-        ptr_d_weight, d_weight_c_frag, ld_d_weight, wmma::mem_row_major);
+    wmma::store_matrix_sync(ptr_d_input, d_input_c_frag, ldc, wmma::mem_row_major);
 }
 
 
@@ -408,7 +372,7 @@ std::vector<torch::Tensor> linear_backward_wmma(
     const dim3 block_dim = {128, 2};
 
     dim3 grid_dim = {
-        div_and_ceil(std::max(d_output.size(0), d_output.size(1)), wmma_dim.x) * warp_size,
+        div_and_ceil(d_output.size(0), wmma_dim.x) * warp_size,
         div_and_ceil(weight.size(0), wmma_dim.y)
     };
 

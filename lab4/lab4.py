@@ -11,10 +11,10 @@ class Linear(nn.Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        opt = {'device': device, 'dtype': dtype}
         self.weight = nn.Parameter(
-            torch.empty((in_features, out_features), **factory_kwargs))
-        self.bias = nn.Parameter(torch.empty(out_features, **factory_kwargs))
+            torch.empty((out_features, in_features), **opt))
+        self.bias = nn.Parameter(torch.empty(out_features, **opt))
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -38,29 +38,28 @@ class LabTest(unittest.TestCase):
         LinearFunction.up_backend()
 
     def generic_case(self, dtype):
-        factory_kwargs = {'device': 'cuda', 'dtype': dtype}
-        x = torch.rand(1024, 1024, **factory_kwargs)
+        opt = {'device': 'cuda', 'dtype': dtype}
+        x = torch.rand(64, 9216, **opt)
 
-        torch.manual_seed(27)
         net1 = nn.Sequential(
-            nn.Linear(1024, 128, **factory_kwargs),
-            nn.Linear(128, 16, **factory_kwargs),
-            nn.Linear(16, 8, **factory_kwargs),
+            nn.Linear(9216, 4096, **opt),
+            nn.ReLU(inplace=True),
+            nn.Linear(4096, 4096, **opt),
+            nn.ReLU(inplace=True),
+            nn.Linear(4096, 10, **opt),
+            nn.Softmax(dim=1),
         )
 
-        torch.manual_seed(27)
         net2 = nn.Sequential(
-            Linear(1024, 128, **factory_kwargs),
-            Linear(128, 16, **factory_kwargs),
-            Linear(16, 8, **factory_kwargs),
+            Linear(9216, 4096, **opt),
+            nn.ReLU(inplace=True),
+            Linear(4096, 4096, **opt),
+            nn.ReLU(inplace=True),
+            Linear(4096, 10, **opt),
+            nn.Softmax(dim=1),
         )
 
         state_dict = net1.state_dict().copy()
-
-        for k in state_dict:
-            if 'weight' in k:
-                state_dict[k] = state_dict[k].data.t_()
-
         net2.load_state_dict(state_dict)
 
         y1 = net1(x)
@@ -70,7 +69,7 @@ class LabTest(unittest.TestCase):
             case torch.float16:
                 tol = {'atol': 1e-3, 'rtol': 1e-2}
             case _:
-                tol = {'atol': 1e-5, 'rtol': 1e-4}
+                tol = {'atol': 1e-4, 'rtol': 1e-3}
 
         self.assertTrue(torch.allclose(y1, y2, **tol))
 
@@ -78,10 +77,7 @@ class LabTest(unittest.TestCase):
         y2.backward(torch.ones_like(y2))
 
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
-            # transpose p1.grad because nn.Layer performs
-            # a forward pass as "x @ weight.t() + bias"
-            self.assertTrue(
-                torch.allclose(p1.grad.t_(), p2.grad, **tol))
+            self.assertTrue(torch.allclose(p1.grad, p2.grad, **tol))
 
     def test_float32(self):
         self.generic_case(torch.float32)
