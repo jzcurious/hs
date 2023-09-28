@@ -257,7 +257,7 @@ if __name__ == '__main__':
     LinearFunction.up_backend('hs/lab3/lab3.cu')
     net = MyNet(num_classes=10)
 
-    train_iteration(train_data, test_data, net, epochs=16, lr=0.04)
+    train_iteration(train_data, test_data, net, epochs=1, lr=0.04)
 
     valid_accuracy_cls = test(net, test_data, num_classes=10)
 

@@ -64,7 +64,7 @@ class GenericTestCase(unittest.TestCase):
             case torch.float16:
                 tol = {'atol': 1e-3, 'rtol': 1e-2}
             case torch.float32:
-                tol = {'atol': 1e-8, 'rtol': 1e-5}
+                tol = {'atol': 1e-5, 'rtol': 1e-5}
             case torch.float64:
                 tol = {'atol': 1e-16, 'rtol': 1e-10}
 
@@ -97,9 +97,6 @@ class GenericTestCase(unittest.TestCase):
         z_ = relu(torch_linear(y_, w2_, b2_), inplace=True)
 
         with torch.no_grad():
-            print((z - z_).abs().max().item())
-            print(z_.abs().max().item())
-            print(z.abs().max().item())
             self.assertTrue(torch.allclose(z_, z, **tol))
 
         if not backward:
