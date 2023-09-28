@@ -44,10 +44,10 @@ __global__ void linear_forward_kernel(
     auto j = blockIdx.z * blockDim.z + threadIdx.z;
 
     auto batch_size = input.size(0);
-    auto weight_t_rows = weight.size(1);
-    auto weight_t_cols = weight.size(0);
+    auto weight_rows = weight.size(0);
+    auto weight_cols = weight.size(1);
 
-    bool guard = k < batch_size and i < weight_t_rows and j < weight_t_cols;
+    bool guard = k < batch_size and i < weight_cols and j < weight_rows;
 
     if (guard) {
         auto part = input[k][i] * weight[j][i];
@@ -75,10 +75,10 @@ __global__ void linear_backward_kernel(
     auto j = blockIdx.z * blockDim.z + threadIdx.z;
 
     auto batch_size = input.size(0);
-    auto weight_t_rows = weight.size(1);
-    auto weight_t_cols = weight.size(0);
+    auto weight_rows = weight.size(0);
+    auto weight_cols = weight.size(1);
 
-    bool guard = k < batch_size and i < weight_t_rows and j < weight_t_cols;
+    bool guard = k < batch_size and i < weight_cols and j < weight_rows;
 
     if (guard) {
         gpuAtomicAdd(&d_input[k][i], d_output[k][j] * weight[j][i]);
@@ -104,21 +104,6 @@ __forceinline__ unsigned int div_and_ceil(float x, float y) {
 }
 
 
-__forceinline__ std::tuple<dim3, dim3> configure_grid(
-    unsigned int nx, unsigned int ny, unsigned int nz) {
-
-    const dim3 block_size = {4, 8, 4};
-
-    const dim3 grid_size = {
-        div_and_ceil(nx, block_size.x),
-        div_and_ceil(ny, block_size.y),
-        div_and_ceil(nz, block_size.z)
-    };
-
-    return {grid_size, block_size}; 
-}
-
-
 torch::Tensor linear_forward(
     torch::Tensor input,
     torch::Tensor weight,
@@ -132,23 +117,27 @@ torch::Tensor linear_forward(
     CHECK_COMPATIBILITY(bias, weight, 0, 0);
 
     auto batch_size = input.size(0);
-    auto weight_t_rows = weight.size(1);
-    auto weight_t_cols = weight.size(0);
+    auto weight_rows = weight.size(0);
+    auto weight_cols = weight.size(1);
 
     auto output = torch::zeros(
-        {batch_size, weight_t_cols},
+        {batch_size, weight_rows},
         input.options()
     );
 
-    dim3 grid_size, block_size;
-    std::tie(grid_size, block_size) = configure_grid(
-        batch_size, weight_t_rows, weight_t_cols);
+    constexpr dim3 block_dim = {4, 8, 4};
+
+    const dim3 grid_dim = {
+        div_and_ceil(batch_size, block_dim.x),
+        div_and_ceil(weight_cols, block_dim.y),
+        div_and_ceil(weight_rows, block_dim.z)
+    };
 
     AT_DISPATCH_FLOATING_TYPES(
         input.scalar_type(),
         "linear_forward",
         ([&] {
-            linear_forward_kernel<<<grid_size, block_size>>>(
+            linear_forward_kernel<<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 bias.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
@@ -178,22 +167,26 @@ std::vector<torch::Tensor> linear_backward(
     CHECK_COMPATIBILITY(d_output, bias, 1, 0);
 
     auto batch_size = input.size(0);
-    auto weight_t_rows = weight.size(1);
-    auto weight_t_cols = weight.size(0);
+    auto weight_rows = weight.size(0);
+    auto weight_cols = weight.size(1);
 
     auto d_input = torch::zeros_like(input);
     auto d_weight = torch::zeros_like(weight);
     auto d_bias = torch::zeros_like(bias);
 
-    dim3 grid_size, block_size;
-    std::tie(grid_size, block_size) = configure_grid(
-        batch_size, weight_t_rows, weight_t_rows);
+    constexpr dim3 block_dim = {4, 8, 4};
+
+    const dim3 grid_dim = {
+        div_and_ceil(batch_size, block_dim.x),
+        div_and_ceil(weight_cols, block_dim.y),
+        div_and_ceil(weight_rows, block_dim.z)
+    };
 
     AT_DISPATCH_FLOATING_TYPES(
         input.scalar_type(),
         "linear_backward",
         ([&] {
-            linear_backward_kernel<<<grid_size, block_size>>>(
+            linear_backward_kernel<<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 d_output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),

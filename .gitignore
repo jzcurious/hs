@@ -183,3 +183,6 @@ data/
 # Models
 *.pt
 *.pth
+
+# Notes
+*.draft.cu

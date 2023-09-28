@@ -32,18 +32,17 @@ void gpuAtomicAdd(scalar_t *acc_ptr, scalar_t part_val) {
 }
 
 
-template <int batch_size_per_block, int weight_t_rows_per_block,
-          int weight_t_cols_per_block, typename scalar_t>
+template <int batch_frag, int weight_cols_frag, int weight_rows_frag, typename scalar_t>
 __global__ void linear_forward_kernel_shmem(
     const accessor_2d<scalar_t> input,
     const accessor_2d<scalar_t> weight,
     const accessor_1d<scalar_t> bias,
     accessor_2d<scalar_t> output) {
 
-    __shared__ scalar_t local_input[batch_size_per_block][weight_t_rows_per_block];     // 32: 128b .. 256b
-    __shared__ scalar_t local_weight[weight_t_rows_per_block][weight_t_cols_per_block]; // 32: 128b .. 256b
-    __shared__ scalar_t local_bias[weight_t_cols_per_block];                            //  4: 16b  ..  32b
-    __shared__ scalar_t local_output[batch_size_per_block][weight_t_cols_per_block];    // 16: 64b  .. 128b
+    __shared__ scalar_t local_input[batch_frag][weight_cols_frag];          // 32: 128b .. 256b
+    __shared__ scalar_t local_weight_t[weight_cols_frag][weight_rows_frag]; // 32: 128b .. 256b
+    __shared__ scalar_t local_bias[weight_cols_frag];                       //  4: 16b  ..  32b
+    __shared__ scalar_t local_output[batch_frag][weight_rows_frag];         // 16: 64b  .. 128b
 
     auto k = blockIdx.x * blockDim.x + threadIdx.x;
     auto i = blockIdx.y * blockDim.y + threadIdx.y;
@@ -54,10 +53,10 @@ __global__ void linear_forward_kernel_shmem(
     auto l_j = threadIdx.z;
 
     auto batch_size = input.size(0);
-    auto weight_t_rows = weight.size(1);
-    auto weight_t_cols = weight.size(0);
+    auto weight_rows = weight.size(0);
+    auto weight_cols = weight.size(1);
 
-    bool guard = k < batch_size and i < weight_t_rows and j < weight_t_cols;
+    bool guard = k < batch_size and i < weight_cols and j < weight_rows;
 
     if (guard) {
         if (l_j == 0) {
@@ -65,7 +64,7 @@ __global__ void linear_forward_kernel_shmem(
         }
 
         if (l_k == 0) {
-            local_weight[l_i][l_j] = weight[j][i];
+            local_weight_t[l_i][l_j] = weight[j][i];
         }
 
         if (l_k == 0 and l_i == 0) {
@@ -80,7 +79,7 @@ __global__ void linear_forward_kernel_shmem(
     __syncthreads();
 
     if (guard) {
-        auto part = local_input[l_k][l_i] * local_weight[l_i][l_j];
+        auto part = local_input[l_k][l_i] * local_weight_t[l_i][l_j];
 
         if (i == 0) {
            part += local_bias[l_j];
@@ -97,8 +96,7 @@ __global__ void linear_forward_kernel_shmem(
 }
 
 
-template <int batch_size_per_block, int weight_t_rows_per_block,
-          int weight_t_cols_per_block, typename scalar_t>
+template <int batch_frag, int weight_cols_frag, int weight_rows_frag, typename scalar_t>
 __global__ void linear_backward_kernel_shmem(
     const accessor_2d<scalar_t> input,
     const accessor_2d<scalar_t> weight,
@@ -107,12 +105,12 @@ __global__ void linear_backward_kernel_shmem(
     accessor_2d<scalar_t> d_weight,
     accessor_1d<scalar_t> d_bias) {
 
-    __shared__ scalar_t local_input[batch_size_per_block][weight_t_rows_per_block];         // 32: 128b .. 256b
-    __shared__ scalar_t local_weight[weight_t_rows_per_block][weight_t_cols_per_block];     // 32: 128b .. 256b
-    __shared__ scalar_t local_d_output[batch_size_per_block][weight_t_cols_per_block];      // 16:  64b .. 128b
-    __shared__ scalar_t local_d_input[batch_size_per_block][weight_t_rows_per_block];       // 32: 128b .. 256b
-    __shared__ scalar_t local_d_weight[weight_t_rows_per_block][weight_t_cols_per_block];   // 32: 128b .. 256b
-    __shared__ scalar_t local_d_bias[weight_t_cols_per_block];                              //  4:  16b ..  32b
+    __shared__ scalar_t local_input[batch_frag][weight_cols_frag];            // 32: 128b .. 256b
+    __shared__ scalar_t local_weight_t[weight_cols_frag][weight_rows_frag];   // 32: 128b .. 256b
+    __shared__ scalar_t local_d_output[batch_frag][weight_rows_frag];         // 16:  64b .. 128b
+    __shared__ scalar_t local_d_input[batch_frag][weight_cols_frag];          // 32: 128b .. 256b
+    __shared__ scalar_t local_d_weight_t[weight_cols_frag][weight_rows_frag]; // 32: 128b .. 256b
+    __shared__ scalar_t local_d_bias[weight_rows_frag];                       //  4:  16b ..  32b
 
     auto k = blockIdx.x * blockDim.x + threadIdx.x;
     auto i = blockIdx.y * blockDim.y + threadIdx.y;
@@ -123,10 +121,10 @@ __global__ void linear_backward_kernel_shmem(
     auto l_j = threadIdx.z;
 
     auto batch_size = input.size(0);
-    auto weight_t_rows = weight.size(1);
-    auto weight_t_cols = weight.size(0);
+    auto weight_rows = weight.size(0);
+    auto weight_cols = weight.size(1);
 
-    bool guard = k < batch_size and i < weight_t_rows and j < weight_t_cols;
+    bool guard = k < batch_size and i < weight_cols and j < weight_rows;
 
     if (guard) {
         if (l_j == 0) {
@@ -135,8 +133,8 @@ __global__ void linear_backward_kernel_shmem(
         }
 
         if (l_k == 0) {
-            local_weight[l_i][l_j] = weight[j][i];
-            local_d_weight[l_i][l_j] = 0;
+            local_weight_t[l_i][l_j] = weight[j][i];
+            local_d_weight_t[l_i][l_j] = 0;
         }
         
         if (l_i == 0) {
@@ -152,9 +150,9 @@ __global__ void linear_backward_kernel_shmem(
 
     if (guard) {
         gpuAtomicAdd(&local_d_input[l_k][l_i],
-            local_d_output[l_k][l_j] * local_weight[l_i][l_j]);
+            local_d_output[l_k][l_j] * local_weight_t[l_i][l_j]);
         
-        gpuAtomicAdd(&local_d_weight[l_i][l_j],
+        gpuAtomicAdd(&local_d_weight_t[l_i][l_j],
             local_d_output[l_k][l_j] * local_input[l_k][l_i]);
 
         if (i == 0) {
@@ -170,7 +168,7 @@ __global__ void linear_backward_kernel_shmem(
         }
 
         if (l_k == 0) {
-            gpuAtomicAdd(&d_weight[j][i], local_d_weight[l_i][l_j]);
+            gpuAtomicAdd(&d_weight[j][i], local_d_weight_t[l_i][l_j]);
         }
 
         if (l_k == 0 and l_i == 0) {
@@ -206,11 +204,11 @@ torch::Tensor linear_forward(
     CHECK_COMPATIBILITY(bias, weight, 0, 0);
 
     auto batch_size = input.size(0);
-    auto weight_t_rows = weight.size(1);
-    auto weight_t_cols = weight.size(0);
+    auto weight_rows = weight.size(0);
+    auto weight_cols = weight.size(1);
 
     auto output = torch::zeros(
-        {batch_size, weight_t_cols},
+        {batch_size, weight_rows},
         input.options()
     );
 
@@ -218,8 +216,8 @@ torch::Tensor linear_forward(
 
     const dim3 grid_dim = {
         div_and_ceil(batch_size, block_dim.x),
-        div_and_ceil(weight_t_rows, block_dim.y),
-        div_and_ceil(weight_t_cols, block_dim.z)
+        div_and_ceil(weight_cols, block_dim.y),
+        div_and_ceil(weight_rows, block_dim.z)
     };
 
     AT_DISPATCH_FLOATING_TYPES(
@@ -256,8 +254,8 @@ std::vector<torch::Tensor> linear_backward(
     CHECK_COMPATIBILITY(d_output, bias, 1, 0);
 
     auto batch_size = input.size(0);
-    auto weight_t_rows = weight.size(1);
-    auto weight_t_cols = weight.size(0);
+    auto weight_rows = weight.size(0);
+    auto weight_cols = weight.size(1);
 
     auto d_input = torch::zeros_like(input);
     auto d_weight = torch::zeros_like(weight);
@@ -267,8 +265,8 @@ std::vector<torch::Tensor> linear_backward(
 
     const dim3 grid_dim = {
         div_and_ceil(batch_size, block_dim.x),
-        div_and_ceil(weight_t_rows, block_dim.y),
-        div_and_ceil(weight_t_cols, block_dim.z)
+        div_and_ceil(weight_cols, block_dim.y),
+        div_and_ceil(weight_rows, block_dim.z)
     };
 
     AT_DISPATCH_FLOATING_TYPES(

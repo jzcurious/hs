@@ -31,7 +31,7 @@ def parse_profile(prof, sort_by='cuda_time_total', row_limit=12):
 class Lab6TestCase(
     GenericTestCase, metaclass=TestCaseFactory,
     dtypes=[torch.float64, torch.float32],
-    verif=True, backward=True, backend='hs/lab6/lab6.cu', wmma=False
+    backward=True, backend='hs/lab6/lab6.cu', wmma=False
 ):
 
     pass

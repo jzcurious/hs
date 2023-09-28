@@ -213,7 +213,7 @@ def train_iteration(
 
 
 def test(net, test_data, num_classes,
-         device='cuda:0', bar_label='', use_best_model=True):
+         device='cuda:0', bar_label='', use_best_model=False):
 
     t = torch.zeros(num_classes, device=device)
     f = torch.zeros(num_classes, device=device)
