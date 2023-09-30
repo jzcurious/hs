@@ -8,14 +8,18 @@ from io import StringIO
 
 
 def run_test_with_profiler(
-        *test_cases, activities=[ProfilerActivity.CUDA], verbosity=2):
+        *test_cases,
+        activities=[ProfilerActivity.CUDA],
+        verbosity=2,
+        **profiler_kwargs
+):
 
     suite = unittest.TestSuite([
         unittest.defaultTestLoader.loadTestsFromTestCase(test_case)
         for test_case in test_cases
     ])
 
-    with profile(activities=activities) as prof:
+    with profile(activities=activities, **profiler_kwargs) as prof:
         unittest.TextTestRunner(verbosity=verbosity).run(suite)
 
     return prof
@@ -37,6 +41,16 @@ def parse_profile(prof, **kwargs):
     return df
 
 
+def is_notebook():
+    try:
+        if get_ipython().__class__.__name__:
+            return True
+        else:
+            return False
+    except NameError:
+        return False
+
+
 class Lab6TestCase(
     GenericTestCase, metaclass=TestCaseFactory,
     dtypes=[torch.float64, torch.float32],
@@ -48,12 +62,24 @@ class Lab6TestCase(
 
 if __name__ == '__main__':
     prof = run_test_with_profiler(Lab3TestCase, Lab6TestCase)
+    # prof = run_test_with_profiler(Lab6TestCase)
+
+    table_kwargs = {
+        'sort_by': "cuda_time_total",
+        'row_limit': 12
+    }
 
     df = parse_profile(
-        prof, sort_by="cuda_time_total",
-        row_limit=12
+        prof, **table_kwargs
     )
 
-    print(df)
+    filtered_df = df[df.Name.str.contains(r'linear.*float')]
+
+    if is_notebook():
+        from IPython.display import display
+        display(filtered_df)
+    else:
+        print(end=2*'\n')
+        print(filtered_df)
 
     prof.export_chrome_trace('prof.out')
