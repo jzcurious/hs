@@ -69,7 +69,7 @@ class LabTest(unittest.TestCase):
             case torch.float16:
                 tol = {'atol': 1e-3, 'rtol': 1e-2}
             case _:
-                tol = {'atol': 1e-4, 'rtol': 1e-3}
+                tol = {'atol': 1e-5, 'rtol': 1e-5}
 
         self.assertTrue(torch.allclose(y1, y2, **tol))
 

@@ -167,6 +167,7 @@ torch::Tensor matmul(
 }
 
 
+// TODO: add overloading
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("matmul", &matmul<false, false>, "Performs C = AB with CUDA Tensor Cores");
     m.def("matmul_ta", &matmul<true, false>, "Performs C = A^TB with CUDA Tensor Cores");

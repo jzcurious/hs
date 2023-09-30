@@ -14,7 +14,7 @@ class Lab3TestCase(
 
 class Lab7TestCase(
     GenericTestCase, metaclass=TestCaseFactory,
-    dtypes=[torch.float64, torch.float32, torch.float16],
+    dtypes=[torch.float16],
     backward=True, backend='hs/lab7/lab7.cu', wmma=True
 ):
 

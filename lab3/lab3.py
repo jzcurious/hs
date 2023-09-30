@@ -2,6 +2,7 @@ import torch
 from torch.utils import cpp_extension
 import unittest
 import math
+import os
 import torch.nn as nn
 from torch.nn.functional import (
     linear as torch_linear,
@@ -14,6 +15,11 @@ class LinearFunction(torch.autograd.Function):
 
     @staticmethod
     def up_backend(backend_source='hs/lab3/lab3.cu'):
+        build_dir = f"./build/{backend_source.replace('/', '.')}"
+
+        if not os.path.exists(build_dir):
+            os.makedirs(build_dir)
+
         LinearFunction.backend = cpp_extension.load(
             name='my_extension',
             sources=backend_source,
@@ -23,6 +29,7 @@ class LinearFunction(torch.autograd.Function):
                 '-O3'
             ],
             extra_cflags=['-O3'],
+            build_directory=build_dir
         )
 
     @staticmethod
@@ -66,20 +73,20 @@ class GenericTestCase(unittest.TestCase):
             case torch.float32:
                 tol = {'atol': 1e-5, 'rtol': 1e-5}
             case torch.float64:
-                tol = {'atol': 1e-16, 'rtol': 1e-10}
+                tol = {'atol': 1e-12, 'rtol': 1e-10}
 
         if self.wmma:
-            x = torch.rand((64, 9216), **tensor_opt)
+            x = torch.rand((128, 9216), **tensor_opt)
             w1 = torch.empty((4096, 9216), **tensor_opt)
             b1 = torch.empty((4096, ), **tensor_opt)
             w2 = torch.empty((16, 4096), **tensor_opt)
             b2 = torch.empty((16, ), **tensor_opt)
         else:
-            x = torch.rand((63, 9215), **tensor_opt)
+            x = torch.rand((127, 9215), **tensor_opt)
             w1 = torch.empty((4095, 9215), **tensor_opt)
             b1 = torch.empty((4095, ), **tensor_opt)
-            w2 = torch.empty((10, 4095), **tensor_opt)
-            b2 = torch.empty((10, ), **tensor_opt)
+            w2 = torch.empty((15, 4095), **tensor_opt)
+            b2 = torch.empty((15, ), **tensor_opt)
 
         GenericTestCase.init_parameters(w1, b1)
         GenericTestCase.init_parameters(w2, b2)

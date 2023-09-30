@@ -111,7 +111,7 @@ __device__ __forceinline__ void matmul_wmma_helper(
 
 
 template <uint wmma_m, uint wmma_n, uint wmma_k>
-__global__ void linear_fwd_kern_wmma(
+__global__ void linear_forward_kernel_wmma(
     const accessor_2d<c10::Half> input,
     const accessor_2d<c10::Half> weight,
     const accessor_1d<c10::Half> bias,
@@ -146,7 +146,7 @@ __global__ void linear_fwd_kern_wmma(
 
 
 template <uint wmma_m, uint wmma_n, uint wmma_k>
-__global__ void linear_bwd_kern_wmma(
+__global__ void linear_backward_kernel_wmma(
     const accessor_2d<c10::Half> input,
     const accessor_2d<c10::Half> weight,
     const accessor_2d<c10::Half> d_output,
@@ -246,7 +246,7 @@ torch::Tensor linear_forward_fp16(
         div_and_ceil(m, wmma_dim.x * block_dim.y)
     };
 
-    linear_fwd_kern_wmma<wmma_dim.x, wmma_dim.y, wmma_dim.z><<<grid_dim, block_dim>>>(
+    linear_forward_kernel_wmma<wmma_dim.x, wmma_dim.y, wmma_dim.z><<<grid_dim, block_dim>>>(
         input.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
         weight.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
         bias.packed_accessor32<c10::Half, 1, torch::RestrictPtrTraits>(),
@@ -311,7 +311,7 @@ std::vector<torch::Tensor> linear_backward_fp16(
         div_and_ceil(m, wmma_dim.x * block_dim.y)
     };
 
-    linear_bwd_kern_wmma<wmma_dim.x, wmma_dim.y, wmma_dim.z><<<grid_dim, block_dim>>>(
+    linear_backward_kernel_wmma<wmma_dim.x, wmma_dim.y, wmma_dim.z><<<grid_dim, block_dim>>>(
         input.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
         weight.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
         d_output.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
