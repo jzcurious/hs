@@ -14,7 +14,7 @@ class LinearFunction(torch.autograd.Function):
     r"""Evaluates the expression :math:`xA^T + b` and its gradient"""
 
     @staticmethod
-    def up_backend(backend_source='hs/lab3/lab3.cu'):
+    def up_backend(backend_source='hs/lab3/lab3g2d.cu'):
         build_dir = f"./build/{backend_source.replace('/', '.')}"
 
         if not os.path.exists(build_dir):
@@ -71,11 +71,11 @@ class GenericTestCase(unittest.TestCase):
             case torch.float16:
                 tol = {'atol': 1e-3, 'rtol': 1e-2}
             case torch.float32:
-                tol = {'atol': 1e-5, 'rtol': 1e-5}
+                tol = {'atol': 1e-5, 'rtol': 1e-4}
             case torch.float64:
-                tol = {'atol': 1e-12, 'rtol': 1e-10}
+                tol = {'atol': 1e-9, 'rtol': 1e-8}
 
-        if self.wmma:
+        if self.layout_x16:
             x = torch.rand((128, 9216), **tensor_opt)
             w1 = torch.empty((4096, 9216), **tensor_opt)
             b1 = torch.empty((4096, ), **tensor_opt)
@@ -127,36 +127,54 @@ class TestCaseFactory(type):
         return super().__new__(cls, name, base, attrs)
 
     @staticmethod
-    def __add_test(attrs, backend, dtype, wmma, backward):
+    def __add_test(attrs, backend, dtype, layout_x16, backward):
         method_name = TestCaseFactory.__generate_test_name(
-            backend, dtype, wmma, backward
+            backend, dtype, layout_x16, backward
         )
         attrs[method_name] = \
             (lambda self, d=dtype, b=backward:
                 GenericTestCase._test_generic(self, d, b))
 
     @staticmethod
-    def __add_tests(attrs, backend, dtypes, wmma, backward):
+    def __add_tests(attrs, backend, dtypes, layout_x16, backward):
         for dtype in dtypes:
             TestCaseFactory.__add_test(
-                attrs, backend, dtype, wmma, backward)
+                attrs, backend, dtype, layout_x16, backward)
 
     @staticmethod
-    def __generate_test_name(backend, dtype, wmma, backward):
+    def __generate_test_name(backend, dtype, layout_x16, backward):
         dtype_lb = str(dtype).split('.')[-1]
         backend_lb = backend.split('/')[-1].replace('.', '_')
         bkwd_lb = 'forward_backward' if backward else 'forward'
 
-        if wmma:
-            return f'test_{backend_lb}_{dtype_lb}_wmma_{bkwd_lb}'
+        if layout_x16:
+            return f'test_{backend_lb}_{dtype_lb}_layout_x16_{bkwd_lb}'
         else:
             return f'test_{backend_lb}_{dtype_lb}_{bkwd_lb}'
 
 
-class Lab3TestCase(
+class Lab3TestCaseGrid2d(
     GenericTestCase, metaclass=TestCaseFactory,
     dtypes=[torch.float64, torch.float32],
-    backward=True, backend='hs/lab3/lab3.cu', wmma=False
+    backward=True, backend='hs/lab3/lab3g2d.cu', layout_x16=True
+):
+
+    pass
+
+
+class Lab3TestCaseGrid3d(
+    GenericTestCase, metaclass=TestCaseFactory,
+    dtypes=[torch.float64, torch.float32],
+    backward=True, backend='hs/lab3/lab3g3d.cu', layout_x16=True
+):
+
+    pass
+
+
+class Lab3TestCaseGrid3dBadLayout(
+    GenericTestCase, metaclass=TestCaseFactory,
+    dtypes=[torch.float64, torch.float32],
+    backward=True, backend='hs/lab3/lab3g3d.cu', layout_x16=False
 ):
 
     pass

@@ -1,4 +1,9 @@
-from ..lab3.lab3 import GenericTestCase, TestCaseFactory, Lab3TestCase
+from ..lab3.lab3 import (
+    GenericTestCase,
+    TestCaseFactory,
+    Lab3TestCaseGrid2d,
+    Lab3TestCaseGrid3d
+)
 from torch.profiler import profile, ProfilerActivity
 import unittest
 import torch
@@ -51,27 +56,43 @@ def is_notebook():
         return False
 
 
-class Lab6TestCase(
+class Lab6TestCaseGrid2d(
     GenericTestCase, metaclass=TestCaseFactory,
     dtypes=[torch.float64, torch.float32],
-    backward=True, backend='hs/lab6/lab6.cu', wmma=False
+    backward=True, backend='hs/lab6/lab6g2d.cu', layout_x16=True
+):
+
+    pass
+
+
+class Lab6TestCaseGrid3d(
+    GenericTestCase, metaclass=TestCaseFactory,
+    dtypes=[torch.float64, torch.float32],
+    backward=True, backend='hs/lab6/lab6g3d.cu', layout_x16=True
 ):
 
     pass
 
 
 if __name__ == '__main__':
-    prof = run_test_with_profiler(Lab3TestCase, Lab6TestCase)
+    prof = run_test_with_profiler(
+        Lab3TestCaseGrid2d,
+        Lab3TestCaseGrid3d,
+        Lab6TestCaseGrid2d,
+        Lab6TestCaseGrid3d
+    )
     # prof = run_test_with_profiler(Lab6TestCase)
 
     table_kwargs = {
         'sort_by': "cuda_time_total",
-        'row_limit': 12
+        'row_limit': 20
     }
 
     df = parse_profile(
         prof, **table_kwargs
     )
+
+    df.drop(df.iloc[:, 1:6], inplace=True, axis=1)
 
     filtered_df = df[df.Name.str.contains(r'linear.*float')]
 

@@ -53,7 +53,7 @@ __device__ bool matrix_guard(
 
 
 template <typename dst_scalar_t, bool transposed = false, typename src_scalar_t>
-__device__ dst_scalar_t *get_fragment_ptr(
+__device__ __forceinline__ dst_scalar_t *get_fragment_ptr(
     const accessor_2d<src_scalar_t> matrix, uint row, uint col, uint ld) {
 
     if (transposed) {

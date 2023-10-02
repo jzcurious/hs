@@ -33,7 +33,7 @@ void gpuAtomicAdd(scalar_t *acc_ptr, scalar_t part_val) {
 
 
 template <int batch_frag, int weight_cols_frag, int weight_rows_frag, typename scalar_t>
-__global__ void linear_forward_kernel_shmem(
+__global__ void linear_fwd_kern_smem(
     const accessor_2d<scalar_t> input,
     const accessor_2d<scalar_t> weight,
     const accessor_1d<scalar_t> bias,
@@ -97,7 +97,7 @@ __global__ void linear_forward_kernel_shmem(
 
 
 template <int batch_frag, int weight_cols_frag, int weight_rows_frag, typename scalar_t>
-__global__ void linear_backward_kernel_shmem(
+__global__ void linear_bwd_kern_smem(
     const accessor_2d<scalar_t> input,
     const accessor_2d<scalar_t> weight,
     const accessor_2d<scalar_t> d_output,
@@ -224,7 +224,7 @@ torch::Tensor linear_forward(
         input.scalar_type(),
         "linear_forward",
         ([&] {
-            linear_forward_kernel_shmem<block_dim.x, block_dim.y, block_dim.z><<<grid_dim, block_dim>>>(
+            linear_fwd_kern_smem<block_dim.x, block_dim.y, block_dim.z><<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 bias.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
@@ -273,7 +273,7 @@ std::vector<torch::Tensor> linear_backward(
         input.scalar_type(),
         "linear_backward",
         ([&] {
-            linear_backward_kernel_shmem<block_dim.x, block_dim.y, block_dim.z><<<grid_dim, block_dim>>>(
+            linear_bwd_kern_smem<block_dim.x, block_dim.y, block_dim.z><<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 d_output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
