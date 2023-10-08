@@ -1,5 +1,6 @@
 #include <torch/extension.h>
 
+namespace impl_g3d {
 
 template <typename scalar_t>
 using accessor_1d = torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPtrTraits>;
@@ -200,8 +201,4 @@ std::vector<torch::Tensor> linear_backward(
     return {d_input, d_weight, d_bias};
 }
 
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("linear_forward", &linear_forward, "Custom linear layer (forward)");
-    m.def("linear_backward", &linear_backward, "Custom linear layer (backward)");
 }

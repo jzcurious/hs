@@ -9,6 +9,10 @@ using accessor_1d = torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPt
 template <typename scalar_t>
 using accessor_2d = torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits>;
 
+template <typename scalar_t>
+using acc_scalar_t = typename std::conditional<
+    std::is_same_v<scalar_t, c10::Half>, float, scalar_t>::type;
+
 
 template <typename scalar_t>
 __forceinline__ __device__
@@ -48,7 +52,7 @@ __global__ void linear_fwd_kern_g2d(
         return;
     }
 
-    scalar_t acc = 0;
+    acc_scalar_t<scalar_t> acc = 0;
     for (int k = 0; k < input.size(1); k++) {
         acc += input[m][k] * weight[n][k];
     }
@@ -70,7 +74,7 @@ __global__ void linear_bwd_kern_g2d(
     auto m = blockIdx.y * blockDim.y + threadIdx.y;
 
     /* dX = dY @ W */
-    scalar_t acc = 0;
+    acc_scalar_t<scalar_t> acc = 0;
     if (m < d_output.size(0) and n < weight.size(1)) {
         for (int k = 0; k < d_output.size(1); k++) {
             acc += d_output[m][k] * weight[k][n];
@@ -134,7 +138,7 @@ torch::Tensor linear_forward(
         div_and_ceil(batch_size, block_dim.y)
     };
 
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(),
         "linear_forward",
         ([&] {
@@ -182,7 +186,7 @@ std::vector<torch::Tensor> linear_backward(
         div_and_ceil(std::max({weight_cols, batch_size}), block_dim.y)
     };
 
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(),
         "linear_backward",
         ([&] {

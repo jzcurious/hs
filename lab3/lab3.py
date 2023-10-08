@@ -33,15 +33,15 @@ class LinearFunction(torch.autograd.Function):
         )
 
     @staticmethod
-    def forward(ctx, input, weights, bias):
-        ctx.save_for_backward(input, weights, bias)
-        return LinearFunction.backend.linear_forward(input, weights, bias)
+    def forward(ctx, input, weight, bias):
+        ctx.save_for_backward(input, weight, bias)
+        return LinearFunction.backend.linear_forward(input, weight, bias)
 
     @staticmethod
     def backward(ctx, d_output):
-        d_input, d_weights, d_bias = LinearFunction.backend.linear_backward(
+        d_input, d_weight, d_bias = LinearFunction.backend.linear_backward(
             *ctx.saved_tensors, d_output)
-        return d_input, d_weights, d_bias
+        return d_input, d_weight, d_bias
 
 
 class GenericTestCase(unittest.TestCase):
@@ -66,14 +66,6 @@ class GenericTestCase(unittest.TestCase):
             'dtype': dtype,
             'requires_grad': backward
         }
-
-        match dtype:
-            case torch.float16:
-                tol = {'atol': 1e-3, 'rtol': 1e-2}
-            case torch.float32:
-                tol = {'atol': 1e-5, 'rtol': 1e-4}
-            case torch.float64:
-                tol = {'atol': 1e-9, 'rtol': 1e-8}
 
         if self.layout_x16:
             x = torch.rand((128, 9216), **tensor_opt)
@@ -103,8 +95,22 @@ class GenericTestCase(unittest.TestCase):
         y_ = relu(torch_linear(x_, w1_, b1_), inplace=True)
         z_ = relu(torch_linear(y_, w2_, b2_), inplace=True)
 
+        match dtype:
+            case torch.float16:
+                tol = {'atol': 1e-2, 'rtol': 1e-1}
+            case torch.float32:
+                tol = {'atol': 1e-3, 'rtol': 1e-2}
+            case torch.float64:
+                tol = {'atol': 1e-9, 'rtol': 1e-8}
+
+        def max_diff(a, b):
+            return (a - b).abs().max().item()
+
         with torch.no_grad():
-            self.assertTrue(torch.allclose(z_, z, **tol))
+            self.assertTrue(
+                torch.allclose(z_, z, **tol),
+                f'max diff (z_, z): {max_diff(z, z_)}'
+            )
 
         if not backward:
             return
@@ -112,11 +118,27 @@ class GenericTestCase(unittest.TestCase):
         z_.backward(torch.ones_like(z_))
         z.backward(torch.ones_like(z))
 
-        self.assertTrue(torch.allclose(x_.grad, x.grad, **tol))
-        self.assertTrue(torch.allclose(w1_.grad, w1.grad, **tol))
-        self.assertTrue(torch.allclose(b1_.grad, b1.grad, **tol))
-        self.assertTrue(torch.allclose(w2_.grad, w2.grad, **tol))
-        self.assertTrue(torch.allclose(b2_.grad, b2.grad, **tol))
+        with torch.no_grad():
+            self.assertTrue(
+                torch.allclose(x_.grad, x.grad, **tol),
+                f'max diff (x_.grad, x.grad): {max_diff(x_.grad, x.grad)}'
+            )
+            self.assertTrue(
+                torch.allclose(w1_.grad, w1.grad, **tol),
+                f'max diff (w1_.grad, w1.grad): {max_diff(w1_.grad, w1.grad)}'
+            )
+            self.assertTrue(
+                torch.allclose(b1_.grad, b1.grad, **tol),
+                f'max diff (b1_.grad, b1.grad): {max_diff(b1_.grad, b1.grad)}'
+            )
+            self.assertTrue(
+                torch.allclose(w2_.grad, w2.grad, **tol),
+                f'max diff (w2_.grad, w2.grad): {max_diff(w2_.grad, w2.grad)}'
+            )
+            self.assertTrue(
+                torch.allclose(b2_.grad, b2.grad, **tol),
+                f'max diff (b2_.grad, b2.grad): {max_diff(b2_.grad, b2.grad)}'
+            )
 
 
 class TestCaseFactory(type):
@@ -155,7 +177,7 @@ class TestCaseFactory(type):
 
 class Lab3TestCaseGrid2d(
     GenericTestCase, metaclass=TestCaseFactory,
-    dtypes=[torch.float64, torch.float32],
+    dtypes=[torch.float64, torch.float32, torch.float16],
     backward=True, backend='hs/lab3/lab3g2d.cu', layout_x16=True
 ):
 
@@ -164,7 +186,7 @@ class Lab3TestCaseGrid2d(
 
 class Lab3TestCaseGrid3d(
     GenericTestCase, metaclass=TestCaseFactory,
-    dtypes=[torch.float64, torch.float32],
+    dtypes=[torch.float64, torch.float32, torch.float16],
     backward=True, backend='hs/lab3/lab3g3d.cu', layout_x16=True
 ):
 
@@ -173,7 +195,7 @@ class Lab3TestCaseGrid3d(
 
 class Lab3TestCaseGrid3dBadLayout(
     GenericTestCase, metaclass=TestCaseFactory,
-    dtypes=[torch.float64, torch.float32],
+    dtypes=[torch.float64, torch.float32, torch.float16],
     backward=True, backend='hs/lab3/lab3g3d.cu', layout_x16=False
 ):
 

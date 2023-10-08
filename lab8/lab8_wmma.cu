@@ -1,5 +1,14 @@
 #include <torch/extension.h>
 #include <mma.h>
+#include <ATen/autocast_mode.h>
+
+namespace impl_wmma {
+
+constexpr dim3 wmma_dim = {
+    16, // M
+    16, // N
+    16  // K
+};
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.device().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
@@ -10,7 +19,7 @@
 
 #define CHECK_DIM_FOR_WMMA(x, wmma_size, dim) TORCH_CHECK_VALUE( \
     x.size(dim) % wmma_size == 0, \
-    #x " size by dim(" #dim ") must be multiples of " #wmma_size " for WMMMA")
+    #x " size by dim(" #dim ") must be multiples of " #wmma_size " for WMMA")
 
 
 using namespace nvcuda;
@@ -33,27 +42,31 @@ template <uint wmma_m, uint wmma_n, uint wmma_k>
 using wmma_fragment_c = wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, float>;
 
 
-template <bool a_transposed, bool b_transposed>
-__device__ bool matrix_guard(
-    const accessor_2d<c10::Half> matrix_a,
-    const accessor_2d<c10::Half> matrix_b,
+template <bool a_transposed = false, bool b_transposed = false, typename scalar_t>
+__device__ __forceinline__ bool product_matrix_guard(
+    const accessor_2d<scalar_t> matrix_a,
+    const accessor_2d<scalar_t> matrix_b,
     const uint a_row_or_col,
     const uint b_col_or_row) {
 
-    if ((not a_transposed) and a_row_or_col >= matrix_a.size(0)) {
-        return false;
+    if constexpr (not a_transposed) {
+        if (a_row_or_col >= matrix_a.size(0)) {
+            return false;
+        }
+    } else {
+        if (a_row_or_col >= matrix_a.size(1)) {
+            return false;
+        }
     }
 
-    if ((not b_transposed) and b_col_or_row >= matrix_b.size(1)) {
-        return false;
-    }
-
-    if (a_transposed and a_row_or_col >= matrix_a.size(1)) {
-        return false;
-    }
-
-    if (b_transposed and b_col_or_row >= matrix_b.size(0)) {
-        return false;
+    if constexpr (not b_transposed) {
+        if (b_col_or_row >= matrix_b.size(1)) {
+            return false;
+        }
+    } else {
+        if (b_col_or_row >= matrix_b.size(0)) {
+            return false;
+        }
     }
 
     return true;
@@ -64,7 +77,7 @@ template <typename dst_scalar_t, bool transposed = false, typename src_scalar_t>
 __device__ dst_scalar_t *get_fragment_ptr(
     const accessor_2d<src_scalar_t> matrix, uint row, uint col, uint ld) {
 
-    if (transposed) {
+    if constexpr (transposed) {
         return reinterpret_cast<dst_scalar_t*>(matrix.data()) + ld * col + row;
     }
 
@@ -111,7 +124,7 @@ __device__ __forceinline__ void matmul_wmma_helper(
 
 
 template <uint wmma_m, uint wmma_n, uint wmma_k>
-__global__ void linear_forward_kernel_wmma(
+__global__ void linear_fwd_kern_wmma(
     const accessor_2d<c10::Half> input,
     const accessor_2d<c10::Half> weight,
     const accessor_1d<c10::Half> bias,
@@ -124,7 +137,7 @@ __global__ void linear_forward_kernel_wmma(
     uint input_row = warp_y * wmma_m;
     uint weight_row = warp_x * wmma_n;
 
-    if (not matrix_guard<false, true>(
+    if (not product_matrix_guard<false, true>(
         input, weight, input_row, weight_row)) {
         return;
     }
@@ -146,7 +159,7 @@ __global__ void linear_forward_kernel_wmma(
 
 
 template <uint wmma_m, uint wmma_n, uint wmma_k>
-__global__ void linear_backward_kernel_wmma(
+__global__ void linear_bwd_kern_wmma(
     const accessor_2d<c10::Half> input,
     const accessor_2d<c10::Half> weight,
     const accessor_2d<c10::Half> d_output,
@@ -167,7 +180,7 @@ __global__ void linear_backward_kernel_wmma(
     uint d_output_row = a_row_or_col;
     uint weight_col = b_col_or_row;
 
-    if (matrix_guard<false, false>(
+    if (product_matrix_guard<false, false>(
         d_output, weight, d_output_row, weight_col)) {
 
         matmul_wmma_helper<wmma_m, wmma_n, wmma_k, false, false>(
@@ -178,7 +191,7 @@ __global__ void linear_backward_kernel_wmma(
     uint d_output_col = a_row_or_col;
     uint input_col = b_col_or_row;
 
-    if (matrix_guard<true, false>(
+    if (product_matrix_guard<true, false>(
         d_output, input, d_output_col, input_col)) {
 
         matmul_wmma_helper<wmma_m, wmma_n, wmma_k, true, false>(
@@ -204,7 +217,7 @@ __forceinline__ unsigned int div_and_ceil(float x, float y) {
 }
 
 
-torch::Tensor linear_forward_fp16(
+torch::Tensor linear_forward_half(
     torch::Tensor input,
     torch::Tensor weight,
     torch::Tensor bias) {
@@ -215,12 +228,6 @@ torch::Tensor linear_forward_fp16(
 
     CHECK_COMPATIBILITY(input, weight, 1, 1);
     CHECK_COMPATIBILITY(bias, weight, 0, 0);
-
-    constexpr dim3 wmma_dim = {
-        16, // M
-        16, // N
-        16  // K
-    };
 
     CHECK_DIM_FOR_WMMA(input, wmma_dim.x, 0);
     CHECK_DIM_FOR_WMMA(input, wmma_dim.z, 1);
@@ -246,18 +253,18 @@ torch::Tensor linear_forward_fp16(
         div_and_ceil(m, wmma_dim.x * block_dim.y)
     };
 
-    linear_forward_kernel_wmma<wmma_dim.x, wmma_dim.y, wmma_dim.z><<<grid_dim, block_dim>>>(
+    linear_fwd_kern_wmma<wmma_dim.x, wmma_dim.y, wmma_dim.z><<<grid_dim, block_dim>>>(
         input.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
         weight.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
         bias.packed_accessor32<c10::Half, 1, torch::RestrictPtrTraits>(),
         output.packed_accessor32<float, 2, torch::RestrictPtrTraits>()
     );
 
-    return output.toType(torch::kFloat16);
+    return output.toType(torch::kHalf);
 }
 
 
-std::vector<torch::Tensor> linear_backward_fp16(
+std::vector<torch::Tensor> linear_backward_half(
     torch::Tensor input,
     torch::Tensor weight,
     torch::Tensor bias,
@@ -272,12 +279,6 @@ std::vector<torch::Tensor> linear_backward_fp16(
     CHECK_COMPATIBILITY(bias, weight, 0, 0);
     CHECK_COMPATIBILITY(d_output, weight, 1, 0);
     CHECK_COMPATIBILITY(d_output, bias, 1, 0);
-
-    constexpr dim3 wmma_dim = {
-        16, // M
-        16, // N
-        16  // K
-    };
 
     CHECK_DIM_FOR_WMMA(d_output, wmma_dim.x, 0);
     CHECK_DIM_FOR_WMMA(d_output, wmma_dim.z, 1);
@@ -311,7 +312,7 @@ std::vector<torch::Tensor> linear_backward_fp16(
         div_and_ceil(m, wmma_dim.x * block_dim.y)
     };
 
-    linear_backward_kernel_wmma<wmma_dim.x, wmma_dim.y, wmma_dim.z><<<grid_dim, block_dim>>>(
+    linear_bwd_kern_wmma<wmma_dim.x, wmma_dim.y, wmma_dim.z><<<grid_dim, block_dim>>>(
         input.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
         weight.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
         d_output.packed_accessor32<c10::Half, 2, torch::RestrictPtrTraits>(),
@@ -321,14 +322,42 @@ std::vector<torch::Tensor> linear_backward_fp16(
     );
 
     return {
-        d_input.toType(torch::kFloat16),
-        d_weight.toType(torch::kFloat16), 
-        d_bias.toType(torch::kFloat16)
+        d_input.toType(torch::kHalf),
+        d_weight.toType(torch::kHalf), 
+        d_bias.toType(torch::kHalf)
     };
 }
 
+torch::Tensor linear_forward(
+    torch::Tensor input,
+    torch::Tensor weight,
+    torch::Tensor bias) {
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("linear_forward", &linear_forward_fp16, "Custom linear layer (forward)");
-    m.def("linear_backward", &linear_backward_fp16, "Custom linear layer (backward)");
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        c10::DispatchKey::Autocast);
+
+    return linear_forward_half(
+        at::autocast::cached_cast(torch::kHalf, input),
+        at::autocast::cached_cast(torch::kHalf, weight),
+        at::autocast::cached_cast(torch::kHalf, bias)
+    );
+}
+
+std::vector<torch::Tensor> linear_backward(
+    torch::Tensor input,
+    torch::Tensor weight,
+    torch::Tensor bias,
+    torch::Tensor d_output) {
+
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        c10::DispatchKey::Autocast);
+    
+    return linear_backward_half(
+        at::autocast::cached_cast(torch::kHalf, input),
+        at::autocast::cached_cast(torch::kHalf, weight),
+        at::autocast::cached_cast(torch::kHalf, bias),
+        at::autocast::cached_cast(torch::kHalf, d_output)
+    );
+}
+
 }

@@ -10,7 +10,7 @@
 
 #define CHECK_DIM_FOR_WMMA(x, wmma_size, dim) TORCH_CHECK_VALUE( \
     x.size(dim) % wmma_size == 0, \
-    #x " size by dim(" #dim ") must be multiples of " #wmma_size " for WMMMA")
+    #x " size by dim(" #dim ") must be multiples of " #wmma_size " for WMMA")
 
 
 using namespace nvcuda;
@@ -33,27 +33,31 @@ template <uint wmma_m, uint wmma_n, uint wmma_k>
 using wmma_fragment_c = wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, float>;
 
 
-template <bool a_transposed, bool b_transposed>
-__device__ bool matrix_guard(
+template <bool a_transposed = false, bool b_transposed = false>
+__device__ __forceinline__ bool product_matrix_guard(
     const accessor_2d<c10::Half> matrix_a,
     const accessor_2d<c10::Half> matrix_b,
     const uint a_row_or_col,
     const uint b_col_or_row) {
 
-    if ((not a_transposed) and a_row_or_col >= matrix_a.size(0)) {
-        return false;
+    if constexpr (not a_transposed) {
+        if (a_row_or_col >= matrix_a.size(0)) {
+            return false;
+        }
+    } else {
+        if (a_row_or_col >= matrix_a.size(1)) {
+            return false;
+        }
     }
 
-    if ((not b_transposed) and b_col_or_row >= matrix_b.size(1)) {
-        return false;
-    }
-
-    if (a_transposed and a_row_or_col >= matrix_a.size(1)) {
-        return false;
-    }
-
-    if (b_transposed and b_col_or_row >= matrix_b.size(0)) {
-        return false;
+    if constexpr (not b_transposed) {
+        if (b_col_or_row >= matrix_b.size(1)) {
+            return false;
+        }
+    } else {
+        if (b_col_or_row >= matrix_b.size(0)) {
+            return false;
+        }
     }
 
     return true;
@@ -64,7 +68,7 @@ template <typename dst_scalar_t, bool transposed = false, typename src_scalar_t>
 __device__ dst_scalar_t *get_fragment_ptr(
     const accessor_2d<src_scalar_t> matrix, uint row, uint col, uint ld) {
 
-    if (transposed) {
+    if constexpr (transposed) {
         return reinterpret_cast<dst_scalar_t*>(matrix.data()) + ld * col + row;
     }
 
@@ -80,8 +84,11 @@ __device__ __forceinline__ void matmul_wmma_helper(
     const uint a_row_or_col,
     const uint b_col_or_row) {
 
-    using layout_a = typename std::conditional<transpose_a, wmma::col_major, wmma::row_major>::type;
-    using layout_b = typename std::conditional<transpose_b, wmma::col_major, wmma::row_major>::type;
+    using layout_a = typename std::conditional<
+        transpose_a, wmma::col_major, wmma::row_major>::type;
+    
+    using layout_b = typename std::conditional<
+        transpose_b, wmma::col_major, wmma::row_major>::type;
 
     wmma_fragment_a<wmma_m, wmma_n, wmma_k, layout_a> a_frag;
     wmma_fragment_b<wmma_m, wmma_n, wmma_k, layout_b> b_frag;
@@ -124,7 +131,7 @@ __global__ void linear_fwd_kern_wmma(
     uint input_row = warp_y * wmma_m;
     uint weight_row = warp_x * wmma_n;
 
-    if (not matrix_guard<false, true>(
+    if (not product_matrix_guard<false, true>(
         input, weight, input_row, weight_row)) {
         return;
     }
@@ -167,7 +174,7 @@ __global__ void linear_bwd_kern_wmma(
     uint d_output_row = a_row_or_col;
     uint weight_col = b_col_or_row;
 
-    if (matrix_guard<false, false>(
+    if (product_matrix_guard<false, false>(
         d_output, weight, d_output_row, weight_col)) {
 
         matmul_wmma_helper<wmma_m, wmma_n, wmma_k, false, false>(
@@ -178,7 +185,7 @@ __global__ void linear_bwd_kern_wmma(
     uint d_output_col = a_row_or_col;
     uint input_col = b_col_or_row;
 
-    if (matrix_guard<true, false>(
+    if (product_matrix_guard<true, false>(
         d_output, input, d_output_col, input_col)) {
 
         matmul_wmma_helper<wmma_m, wmma_n, wmma_k, true, false>(

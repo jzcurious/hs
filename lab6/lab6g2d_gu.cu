@@ -1,6 +1,5 @@
 #include <torch/extension.h>
 
-
 using uint = __uint32_t;
 
 template <typename scalar_t>
@@ -70,14 +69,43 @@ __device__ __forceinline__ bool product_matrix_guard(
 
 
 template <bool transposed = false, typename scalar_t>
+__device__ __forceinline__ bool matrix_guard(
+    const accessor_2d<scalar_t> matrix,
+    const uint row, const uint col) {
+
+    if constexpr (not transposed) {
+        return (row < matrix.size(0) and col < matrix.size(1));
+    } else {
+        return (row < matrix.size(1) and col < matrix.size(0));
+    }
+}
+
+
+template <bool transposed = false, typename scalar_t>
 __device__ __forceinline__ scalar_t get_matrix_elem(
     const accessor_2d<scalar_t> matrix, uint row, uint col) {
 
     if constexpr (transposed) {
-        return matrix[col][row];
+        if (matrix_guard<transposed>(matrix, row, col)) {
+            return matrix[col][row];
+        }
+        else {
+            return 0;
+        }
     } else {
-        return matrix[row][col];
+        if (matrix_guard<transposed>(matrix, row, col)) {
+            return matrix[row][col];
+        }
+        else {
+            return 0;
+        }
     }
+}
+
+
+__host__ __device__
+__forceinline__ unsigned int div_and_ceil(float x, float y) {
+    return ceil(x / y);
 }
 
 
@@ -95,15 +123,16 @@ __device__ void matmul_smma_helper(
 
     auto sd = transpose_a ? matrix_a.size(0) : matrix_a.size(1);
 
-    for (uint t = 0; t < sd; t += tile_size) {
+    for (uint t = 0; t < div_and_ceil(sd, tile_size); t++) {
         uint j = threadIdx.x;
         uint i = threadIdx.y;
+        uint offset = t * tile_size;
 
         matrix_a_frag[i][j] = get_matrix_elem<transpose_a>(
-            matrix_a, tile_size * blockIdx.y + i, t + j);
-        
+            matrix_a, tile_size * blockIdx.y + i, offset + j);
+
         matrix_b_frag[i][j] = get_matrix_elem<transpose_b>(
-            matrix_b, t + i, tile_size * blockIdx.x + j);
+            matrix_b, offset + i, tile_size * blockIdx.x + j);
 
         __syncthreads();
 
@@ -115,12 +144,14 @@ __device__ void matmul_smma_helper(
         __syncthreads();
     }
 
-    matrix_c[m][n] = acc;
+    if (product_matrix_guard<transpose_a, transpose_b>(matrix_a, matrix_b, m, n)) {
+        matrix_c[m][n] = acc;
+    }
 }
 
 
 template <uint tile_size, typename scalar_t>
-__global__ void linear_fwd_kern_smem_g2d(
+__global__ void linear_fwd_kern_smem_g2d_gu(
     const accessor_2d<scalar_t>input,
     const accessor_2d<scalar_t>weight,
     const accessor_1d<scalar_t>bias,
@@ -131,11 +162,11 @@ __global__ void linear_fwd_kern_smem_g2d(
     auto n = blockIdx.x * blockDim.x + threadIdx.x;
     auto m = blockIdx.y * blockDim.y + threadIdx.y;
 
+    matmul_smma_helper<tile_size, false, true>(input, weight, output, m, n);
+
     if (not product_matrix_guard<false, true>(input, weight, m, n)) {
         return;
     }
-
-    matmul_smma_helper<tile_size, false, true>(input, weight, output, m, n);
 
     if (threadIdx.y == 0) {
         local_bias[threadIdx.x] = bias[n];
@@ -148,7 +179,7 @@ __global__ void linear_fwd_kern_smem_g2d(
 
 
 template <uint tile_size, typename scalar_t>
-__global__ void linear_bwd_kern_smem_g2d(
+__global__ void linear_bwd_kern_smem_g2d_gu(
     const accessor_2d<scalar_t> input,
     const accessor_2d<scalar_t> weight,
     const accessor_2d<scalar_t> d_output,
@@ -160,17 +191,13 @@ __global__ void linear_bwd_kern_smem_g2d(
     auto m = blockIdx.y * blockDim.y + threadIdx.y;
 
     /* dX = dY @ W */
-    if (product_matrix_guard<false, false>(d_output, weight, m, n)) {
-        matmul_smma_helper<tile_size, false, false>(d_output, weight, d_input, m, n);
-    }
+    matmul_smma_helper<tile_size, false, false>(d_output, weight, d_input, m, n);
 
     /* dW = dY^T @ X */
-    if (product_matrix_guard<true, false>(d_output, input, m, n)) {
-        matmul_smma_helper<tile_size, true, false>(d_output, input, d_weight, m, n);
-    }
+    matmul_smma_helper<tile_size, true, false>(d_output, input, d_weight, m, n);
 
     /* db = SUM(dY, m) */
-    if (m < d_output.size(0) and n < d_output.size(1)) {
+    if (matrix_guard<false>(d_output, m, n)) {
         gpuAtomicAdd(&d_bias[n], d_output[m][n]);
     }
 }
@@ -182,11 +209,6 @@ __global__ void linear_bwd_kern_smem_g2d(
 #define CHECK_COMPATIBILITY(x, y, d1, d2) \
     TORCH_CHECK(x.size(d1) == y.size(d2), \
     #x " must be the same size by dim(" #d1 ") as " #y " by dim(" #d2 ")")
-
-
-__forceinline__ unsigned int div_and_ceil(float x, float y) {
-    return ceil(x / y);
-}
 
 
 torch::Tensor linear_forward(
@@ -220,7 +242,7 @@ torch::Tensor linear_forward(
         input.scalar_type(),
         "linear_forward",
         ([&] {
-            linear_fwd_kern_smem_g2d<block_dim.x><<<grid_dim, block_dim>>>(
+            linear_fwd_kern_smem_g2d_gu<block_dim.x><<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 bias.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
@@ -268,7 +290,7 @@ std::vector<torch::Tensor> linear_backward(
         input.scalar_type(),
         "linear_backward",
         ([&] {
-            linear_bwd_kern_smem_g2d<block_dim.x><<<grid_dim, block_dim>>>(
+            linear_bwd_kern_smem_g2d_gu<block_dim.x><<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 d_output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),

@@ -91,7 +91,7 @@ def train_iteration(
 
 
 if __name__ == '__main__':
-    LinearFunction.up_backend('hs/lab7/lab7.cu')
+    LinearFunction.up_backend('hs/lab8/lab8_disp.cu')
 
     train_data, test_data = prepare_cifar10()
 

@@ -164,7 +164,7 @@ torch::Tensor linear_forward(
         div_and_ceil(weight_rows, block_dim.z)
     };
 
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(),
         "linear_forward",
         ([&] {
@@ -213,7 +213,7 @@ std::vector<torch::Tensor> linear_backward(
         div_and_ceil(weight_rows, block_dim.z)
     };
 
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(),
         "linear_backward",
         ([&] {
