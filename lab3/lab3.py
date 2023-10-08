@@ -68,13 +68,13 @@ class GenericTestCase(unittest.TestCase):
         }
 
         if self.layout_x16:
-            x = torch.rand((128, 9216), **tensor_opt)
+            x = torch.ones((128, 9216), **tensor_opt)
             w1 = torch.empty((4096, 9216), **tensor_opt)
             b1 = torch.empty((4096, ), **tensor_opt)
             w2 = torch.empty((16, 4096), **tensor_opt)
             b2 = torch.empty((16, ), **tensor_opt)
         else:
-            x = torch.rand((127, 9215), **tensor_opt)
+            x = torch.ones((127, 9215), **tensor_opt)
             w1 = torch.empty((4095, 9215), **tensor_opt)
             b1 = torch.empty((4095, ), **tensor_opt)
             w2 = torch.empty((15, 4095), **tensor_opt)
@@ -99,7 +99,7 @@ class GenericTestCase(unittest.TestCase):
             case torch.float16:
                 tol = {'atol': 1e-2, 'rtol': 1e-1}
             case torch.float32:
-                tol = {'atol': 1e-3, 'rtol': 1e-2}
+                tol = {'atol': 1e-4, 'rtol': 1e-3}
             case torch.float64:
                 tol = {'atol': 1e-9, 'rtol': 1e-8}
 
@@ -108,8 +108,8 @@ class GenericTestCase(unittest.TestCase):
 
         with torch.no_grad():
             self.assertTrue(
-                torch.allclose(z_, z, **tol),
-                f'max diff (z_, z): {max_diff(z, z_)}'
+                torch.allclose(z, z_, **tol),
+                f'max diff (z, z_): {max_diff(z, z_)}'
             )
 
         if not backward:
@@ -120,24 +120,24 @@ class GenericTestCase(unittest.TestCase):
 
         with torch.no_grad():
             self.assertTrue(
-                torch.allclose(x_.grad, x.grad, **tol),
-                f'max diff (x_.grad, x.grad): {max_diff(x_.grad, x.grad)}'
+                torch.allclose(x.grad, x_.grad, **tol),
+                f'max diff (x.grad, x_.grad): {max_diff(x.grad, x_.grad)}'
             )
             self.assertTrue(
-                torch.allclose(w1_.grad, w1.grad, **tol),
-                f'max diff (w1_.grad, w1.grad): {max_diff(w1_.grad, w1.grad)}'
+                torch.allclose(w1.grad, w1_.grad, **tol),
+                f'max diff (w1.grad, w1_.grad): {max_diff(w1.grad, w1_.grad)}'
             )
             self.assertTrue(
-                torch.allclose(b1_.grad, b1.grad, **tol),
-                f'max diff (b1_.grad, b1.grad): {max_diff(b1_.grad, b1.grad)}'
+                torch.allclose(b1.grad, b1_.grad, **tol),
+                f'max diff (b1.grad, b1_.grad): {max_diff(b1.grad, b1_.grad)}'
             )
             self.assertTrue(
-                torch.allclose(w2_.grad, w2.grad, **tol),
-                f'max diff (w2_.grad, w2.grad): {max_diff(w2_.grad, w2.grad)}'
+                torch.allclose(w2.grad, w2_.grad, **tol),
+                f'max diff (w2.grad, w2_.grad): {max_diff(w2.grad, w2_.grad)}'
             )
             self.assertTrue(
-                torch.allclose(b2_.grad, b2.grad, **tol),
-                f'max diff (b2_.grad, b2.grad): {max_diff(b2_.grad, b2.grad)}'
+                torch.allclose(b2.grad, b2_.grad, **tol),
+                f'max diff (b2.grad, b2_.grad): {max_diff(b2.grad, b2_.grad)}'
             )
 
 
@@ -179,6 +179,15 @@ class Lab3TestCaseGrid2d(
     GenericTestCase, metaclass=TestCaseFactory,
     dtypes=[torch.float64, torch.float32, torch.float16],
     backward=True, backend='hs/lab3/lab3g2d.cu', layout_x16=True
+):
+
+    pass
+
+
+class Lab3TestCaseGrid2dBadLayout(
+    GenericTestCase, metaclass=TestCaseFactory,
+    dtypes=[torch.float64, torch.float32, torch.float16],
+    backward=True, backend='hs/lab3/lab3g2d.cu', layout_x16=False
 ):
 
     pass

@@ -13,6 +13,13 @@ using accessor_1d = torch::PackedTensorAccessor32<scalar_t, 1, torch::RestrictPt
 template <typename scalar_t>
 using accessor_2d = torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits>;
 
+template <typename scalar_t>
+using acc_scalar_t = typename std::conditional<
+    std::is_same_v<scalar_t, c10::Half>,
+    float,
+    double
+>::type;
+
 
 template <typename scalar_t>
 __forceinline__ __device__
@@ -91,7 +98,7 @@ __device__ void matmul_smma_helper(
     __shared__ scalar_t matrix_a_frag[tile_size][tile_size];
     __shared__ scalar_t matrix_b_frag[tile_size][tile_size];
 
-    scalar_t acc = 0;
+    acc_scalar_t<scalar_t> acc = 0;
 
     auto sd = transpose_a ? matrix_a.size(0) : matrix_a.size(1);
 
@@ -209,16 +216,18 @@ torch::Tensor linear_forward(
         input.options()
     );
 
+    constexpr dim3 block_dim = {16, 16};
+
     const dim3 grid_dim = {
-        div_and_ceil(weight_rows, smma_dim.x),
-        div_and_ceil(batch_size, smma_dim.y)
+        div_and_ceil(weight_rows, block_dim.x),
+        div_and_ceil(batch_size, block_dim.y)
     };
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(),
         "linear_forward",
         ([&] {
-            linear_fwd_kern_smem_g2d<smma_dim.x><<<grid_dim, smma_dim>>>(
+            linear_fwd_kern_smem_g2d<block_dim.x><<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 bias.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>(),
@@ -255,16 +264,18 @@ std::vector<torch::Tensor> linear_backward(
     auto d_weight = torch::zeros_like(weight);
     auto d_bias = torch::zeros_like(bias);
 
+    constexpr dim3 block_dim = {16, 16};
+
     const dim3 grid_dim = {
-        div_and_ceil(weight_cols, smma_dim.x),
-        div_and_ceil(std::max({weight_cols, batch_size}), smma_dim.y)
+        div_and_ceil(weight_cols, block_dim.x),
+        div_and_ceil(std::max({weight_cols, batch_size}), block_dim.y)
     };
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(),
         "linear_backward",
         ([&] {
-            linear_bwd_kern_smem_g2d<smma_dim.x><<<grid_dim, smma_dim>>>(
+            linear_bwd_kern_smem_g2d<block_dim.x><<<grid_dim, block_dim>>>(
                 input.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 weight.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 d_output.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
@@ -276,6 +287,40 @@ std::vector<torch::Tensor> linear_backward(
     );
 
     return {d_input, d_weight, d_bias};
+}
+
+
+torch::Tensor linear_forward_mixed(
+    torch::Tensor input,
+    torch::Tensor weight,
+    torch::Tensor bias) {
+
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        c10::DispatchKey::Autocast);
+
+    return linear_forward(
+        at::autocast::cached_cast(torch::kHalf, input),
+        at::autocast::cached_cast(torch::kHalf, weight),
+        at::autocast::cached_cast(torch::kHalf, bias)
+    );
+}
+
+
+std::vector<torch::Tensor> linear_backward_mixed(
+    torch::Tensor input,
+    torch::Tensor weight,
+    torch::Tensor bias,
+    torch::Tensor d_output) {
+
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        c10::DispatchKey::Autocast);
+    
+    return linear_backward(
+        at::autocast::cached_cast(torch::kHalf, input),
+        at::autocast::cached_cast(torch::kHalf, weight),
+        at::autocast::cached_cast(torch::kHalf, bias),
+        at::autocast::cached_cast(torch::kHalf, d_output)
+    );
 }
 
 }

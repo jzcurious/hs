@@ -201,4 +201,38 @@ std::vector<torch::Tensor> linear_backward(
     return {d_input, d_weight, d_bias};
 }
 
+
+torch::Tensor linear_forward_mixed(
+    torch::Tensor input,
+    torch::Tensor weight,
+    torch::Tensor bias) {
+
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        c10::DispatchKey::Autocast);
+
+    return linear_forward(
+        at::autocast::cached_cast(torch::kHalf, input),
+        at::autocast::cached_cast(torch::kHalf, weight),
+        at::autocast::cached_cast(torch::kHalf, bias)
+    );
+}
+
+
+std::vector<torch::Tensor> linear_backward_mixed(
+    torch::Tensor input,
+    torch::Tensor weight,
+    torch::Tensor bias,
+    torch::Tensor d_output) {
+
+    c10::impl::ExcludeDispatchKeyGuard no_autocast(
+        c10::DispatchKey::Autocast);
+    
+    return linear_backward(
+        at::autocast::cached_cast(torch::kHalf, input),
+        at::autocast::cached_cast(torch::kHalf, weight),
+        at::autocast::cached_cast(torch::kHalf, bias),
+        at::autocast::cached_cast(torch::kHalf, d_output)
+    );
+}
+
 }

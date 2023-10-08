@@ -9,14 +9,17 @@ bool maybe_wmma(torch::Tensor input, torch::Tensor weight) {
         return false;
     }
 
+    // M
     if (input.size(0) % impl_wmma::wmma_dim.x != 0) {
         return false;
     }
 
+    // N
     if (weight.size(0) % impl_wmma::wmma_dim.y != 0) {
         return false;
     }
 
+    // K
     if (input.size(1) % impl_wmma::wmma_dim.z != 0) {
         return false;
     }
@@ -33,6 +36,8 @@ bool maybe_smma(torch::Tensor input, torch::Tensor weight) {
     if (input.size(0) % impl_smma::smma_dim.y != 0) {
         return false;
     }
+
+    return true;
 }
 
 
@@ -41,8 +46,16 @@ torch::Tensor linear_forward(
     torch::Tensor weight,
     torch::Tensor bias) {
 
-    if (maybe_wmma(input, weight)) {
-        return impl_wmma::linear_forward(input, weight, bias);
+    if (input.scalar_type() == torch::kHalf) {
+        if (maybe_wmma(input, weight)) {
+            return impl_wmma::linear_forward_mixed(input, weight, bias);
+        }
+
+        if (maybe_smma(input, weight)) {
+            return impl_smma::linear_forward_mixed(input, weight, bias);
+        }
+
+        return impl_g3d::linear_forward_mixed(input, weight, bias);
     }
 
     if (maybe_smma(input, weight)) {
@@ -59,8 +72,16 @@ std::vector<torch::Tensor> linear_backward(
     torch::Tensor bias,
     torch::Tensor d_output) {
 
-    if (maybe_wmma(input, weight)) {
-        return impl_wmma::linear_backward(input, weight, bias, d_output);
+    if (input.scalar_type() == torch::kHalf) {
+        if (maybe_wmma(input, weight)) {
+            return impl_wmma::linear_backward_mixed(input, weight, bias, d_output);
+        }
+
+        if (maybe_smma(input, weight)) {
+            return impl_smma::linear_backward_mixed(input, weight, bias, d_output);
+        }
+
+        return impl_g3d::linear_backward_mixed(input, weight, bias, d_output);
     }
 
     if (maybe_smma(input, weight)) {

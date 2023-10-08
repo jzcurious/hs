@@ -14,7 +14,7 @@ void gpuAtomicAdd(scalar_t *acc_ptr, scalar_t part_val) {
     #if __CUDA_ARCH__ >= 700
         if constexpr (std::is_same_v<scalar_t, c10::Half>) {
             atomicAdd(
-                reinterpret_cast<half*>(acc_ptr), 
+                reinterpret_cast<half*>(acc_ptr),
                 static_cast<half>(part_val)
             );
         }

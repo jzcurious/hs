@@ -10,7 +10,10 @@ using accessor_2d = torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPt
 
 template <typename scalar_t>
 using acc_scalar_t = typename std::conditional<
-    std::is_same_v<scalar_t, c10::Half>, float, scalar_t>::type;
+    std::is_same_v<scalar_t, c10::Half>,
+    float,
+    double
+>::type;
 
 
 template <typename scalar_t>

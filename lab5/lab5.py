@@ -254,7 +254,7 @@ def test(net, test_data, num_classes,
 if __name__ == '__main__':
     train_data, test_data = prepare_cifar10()
 
-    LinearFunction.up_backend('hs/lab3/lab3.cu')
+    LinearFunction.up_backend('hs/lab3/lab3g3d.cu')
     net = MyNet(num_classes=10)
 
     train_iteration(train_data, test_data, net, epochs=1, lr=0.04)

@@ -328,7 +328,8 @@ std::vector<torch::Tensor> linear_backward_half(
     };
 }
 
-torch::Tensor linear_forward(
+
+torch::Tensor linear_forward_mixed(
     torch::Tensor input,
     torch::Tensor weight,
     torch::Tensor bias) {
@@ -343,7 +344,8 @@ torch::Tensor linear_forward(
     );
 }
 
-std::vector<torch::Tensor> linear_backward(
+
+std::vector<torch::Tensor> linear_backward_mixed(
     torch::Tensor input,
     torch::Tensor weight,
     torch::Tensor bias,
