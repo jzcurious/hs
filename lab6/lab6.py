@@ -18,7 +18,6 @@ def run_test_with_profiler(
         verbosity=2,
         **profiler_kwargs
 ):
-    """TODO: + context manager"""
 
     suite = unittest.TestSuite([
         unittest.defaultTestLoader.loadTestsFromTestCase(test_case)

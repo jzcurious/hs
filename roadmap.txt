@@ -1,0 +1,30 @@
+{
+    7 sem: 16 weeks = 16 classes,
+    8 sem: 4 weeks,
+
+    complexity = 1..5
+}
+
+
+[BASIC]
+1. CUDA: Programming model (complexity = 5)
+2. PyTorch: Extension (complexity = 1)
+3. CUDA: Atomic operations (complexity = 4)
+4. PyTorch: Autograd (complexity = 5)
+5. PyTorch: Module (complexity = 1)
+6. PyTorch: Model building and training (complexity = 3)
+7. CUDA: Profiling (complexity = 2)
+
+[ADVANCED]
+8. CUDA: Vectorized load/store (complexity = 4)
+9. CUDA: Shared memory (complexity = 5)
+10. CUDA: Warp-level broadcasting (complexity = 5)
+11. CUDA: Half precision (complexity = 3)
+12. CUDA: Tensor cores (complexity = 5)
+13. CUDA: Occupancy and warp divergence (complexity = 4)
+14. PyTorch: Mixed precision training  (complexity = 5)
+
+
+* CG
+* Graph
+* Streams

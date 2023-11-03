@@ -39,7 +39,7 @@ class LabTest(unittest.TestCase):
 
     def generic_case(self, dtype):
         opt = {'device': 'cuda', 'dtype': dtype}
-        x = torch.rand(64, 9216, **opt)
+        x = torch.ones(64, 9216, **opt)
 
         net1 = nn.Sequential(
             nn.Linear(9216, 4096, **opt),

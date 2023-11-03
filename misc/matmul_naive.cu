@@ -53,14 +53,11 @@ __device__ __forceinline__ scalar_t get_matrix_elem(
 }
 
 
-template <uint tile_size, bool transpose_a, bool transpose_b, typename scalar_t>
-__device__ void matmul_smma(
+template <bool transpose_a, bool transpose_b, typename scalar_t>
+__device__ void matmul_naive(
     const accessor_2d<scalar_t> matrix_a,
     const accessor_2d<scalar_t> matrix_b,
     accessor_2d<scalar_t> matrix_c) {
-
-    __shared__ scalar_t matrix_a_frag[tile_size][tile_size];
-    __shared__ scalar_t matrix_b_frag[tile_size][tile_size];
 
     auto n = blockIdx.x * blockDim.x + threadIdx.x;
     auto m = blockIdx.y * blockDim.y + threadIdx.y;
@@ -71,40 +68,24 @@ __device__ void matmul_smma(
     }
 
     scalar_t acc = 0;
-
     auto sd = transpose_a ? matrix_a.size(0) : matrix_a.size(1);
 
-    for (uint t = 0; t < sd; t += tile_size) {
-        uint j = threadIdx.x;
-        uint i = threadIdx.y;
-
-        matrix_a_frag[i][j] = get_matrix_elem<transpose_a>(
-            matrix_a, tile_size * blockIdx.y + i, t + j);
-        
-        matrix_b_frag[i][j] = get_matrix_elem<transpose_b>(
-            matrix_b, t + i, tile_size * blockIdx.x + j);
-
-        __syncthreads();
-
-        #pragma unroll
-        for (int k = 0; k < tile_size; k++) {
-            acc += matrix_a_frag[i][k] * matrix_b_frag[k][j];
-        }
-
-        __syncthreads();
+    for (int k = 0; k < sd; k++) {
+        acc += get_matrix_elem<transpose_a>(matrix_a, m, k) \
+            * get_matrix_elem<transpose_b>(matrix_b, k, n);
     }
 
     matrix_c[m][n] = acc;
 }
 
 
-template <uint tile_size, bool transpose_a, bool transpose_b, typename scalar_t>
-__global__ void matmul_smma_kernel(
+template <bool transpose_a, bool transpose_b, typename scalar_t>
+__global__ void matmul_naive_kernel(
     const accessor_2d<scalar_t> matrix_a,
     const accessor_2d<scalar_t> matrix_b,
     accessor_2d<scalar_t> matrix_c) {
 
-    matmul_smma<tile_size, transpose_a, transpose_b, scalar_t>(
+    matmul_naive<transpose_a, transpose_b, scalar_t>(
         matrix_a, matrix_b, matrix_c);
 }
 
@@ -141,7 +122,7 @@ torch::Tensor matmul(
         matrix_a.scalar_type(),
         "matmul",
         ([&] {
-            matmul_smma_kernel<block_dim.x, transpose_a, transpose_b><<<grid_dim, block_dim>>>(
+            matmul_naive_kernel<transpose_a, transpose_b><<<grid_dim, block_dim>>>(
                 matrix_a.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 matrix_b.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                 matrix_c.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>()
